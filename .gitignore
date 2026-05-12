@@ -7,3 +7,4 @@ data/
 *.egg-info/
 dist/
 build/
+resume_personal_info/
