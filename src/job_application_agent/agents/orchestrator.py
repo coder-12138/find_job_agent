@@ -17,12 +17,12 @@ def _build_instructions(ctx: RunContextWrapper[AppContext], agent: Agent[AppCont
     companies_info = []
     for i, company in enumerate(ctx.context.companies):
         companies_info.append(
-            f"{i+1}. {company.company_name}"
+            f"{i+1}. {company.company_name}（{company.recruitment_type}）"
             f"（关键词: {company.job_keywords}, 城市: {','.join(company.preferred_cities)}）"
         )
     companies_text = "\n".join(companies_info) if companies_info else "暂无公司"
 
-    return f"""你是校招简历投递的协调主Agent（Orchestrator）。你负责协调整个投递流程。
+    return f"""你是简历自动投递的协调主Agent（Orchestrator）。你负责协调整个投递流程。
 
 ## 当前用户信息：
 {user_summary}
@@ -50,8 +50,8 @@ def create_orchestrator(
 ) -> Agent[AppContext]:
     sub_agents = []
     for company in companies:
-        search_agent = create_search_agent(company.company_name)
-        form_agent = create_form_agent(company.company_name)
+        search_agent = create_search_agent(company.company_name, company.recruitment_type)
+        form_agent = create_form_agent(company.company_name, company.recruitment_type)
         sub_agents.append(search_agent)
         sub_agents.append(form_agent)
 
@@ -86,14 +86,14 @@ async def _process_single_company(
         current_company_index=0,
     )
 
-    search_agent = create_search_agent(company.company_name)
-    form_agent = create_form_agent(company.company_name)
+    search_agent = create_search_agent(company.company_name, company.recruitment_type)
+    form_agent = create_form_agent(company.company_name, company.recruitment_type)
 
     try:
         search_result = await Runner.run(
             search_agent,
             input=(
-                f"请搜索{company.company_name}的校招官网，"
+                f"请搜索{company.company_name}的{company.recruitment_type}官网，"
                 f"查找与'{company.job_keywords}'相关的岗位，"
                 f"期望工作城市：{','.join(company.preferred_cities)}。"
                 f"内推码：{company.referral_code or '无'}"
@@ -114,11 +114,11 @@ async def _process_single_company(
     _terminal_print(
         f"{company.company_name} - 岗位搜索完成",
         f"请查看推荐岗位，选择要投递的岗位和志愿顺序，\n"
-        f"然后自行注册账号并进入简历创建页面。",
+        f"然后自行注册账号并进入{company.recruitment_type}简历创建页面。",
         "info",
     )
     user_confirm = _get_user_input(
-        f"是否已为{company.company_name}选好岗位并进入简历创建页面？（yes/no）"
+        f"是否已为{company.company_name}选好岗位并进入{company.recruitment_type}简历创建页面？（yes/no）"
     )
     if user_confirm.lower() not in ("yes", "y", "是"):
         company.status = "user_skipped"
@@ -133,7 +133,7 @@ async def _process_single_company(
         form_result = await Runner.run(
             form_agent,
             input=(
-                f"请在{company.company_name}的简历创建页面填写简历信息。"
+                f"请在{company.company_name}的{company.recruitment_type}简历创建页面填写简历信息。"
             ),
             context=context,
             max_turns=30,
@@ -191,12 +191,13 @@ async def _run_sequential(
         has_desktop=settings.has_desktop,
     )
 
+    recruitment_type = companies[0].recruitment_type if companies else "校招"
     orchestrator = create_orchestrator(user_info, companies)
 
     try:
         result = await Runner.run(
             orchestrator,
-            input="请开始校招简历投递流程。按照公司列表依次处理每个公司的搜索、表单填写和投递。",
+            input=f"请开始{recruitment_type}简历投递流程。按照公司列表依次处理每个公司的搜索、表单填写和投递。",
             context=context,
             max_turns=100,
         )

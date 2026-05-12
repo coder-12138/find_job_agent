@@ -3,7 +3,7 @@ import os
 import json
 
 from job_application_agent.config import Settings
-from job_application_agent.context import AppContext, CompanyState
+from job_application_agent.context import AppContext, CompanyState, RECRUITMENT_TYPES
 from job_application_agent.user_info.parser import (
     UserInfo, PersonalInfo, Education, WorkExperience,
     ProjectExperience, Award, Skill, Publication,
@@ -237,17 +237,25 @@ class TestCompanyState:
         assert cs.submitted is False
         assert cs.form_filled is False
         assert cs.use_resume_parser is None
+        assert cs.recruitment_type == "校招"
 
     def test_with_values(self):
         cs = CompanyState(
             company_name="字节跳动",
+            recruitment_type="社招",
             referral_code="ABC123",
             job_keywords="AI算法",
             preferred_cities=["北京", "上海"],
         )
+        assert cs.recruitment_type == "社招"
         assert cs.referral_code == "ABC123"
         assert cs.job_keywords == "AI算法"
         assert len(cs.preferred_cities) == 2
+
+    def test_recruitment_types(self):
+        for rt in ["校招", "社招", "日常实习", "暑期实习（转正实习）"]:
+            cs = CompanyState(company_name="测试", recruitment_type=rt)
+            assert cs.recruitment_type == rt
 
 
 class TestAgentCreation:
@@ -256,10 +264,18 @@ class TestAgentCreation:
         assert "Search_Google" == agent.name
         assert len(agent.tools) == 5
 
+    def test_search_agent_with_type(self):
+        agent = create_search_agent("Google", "社招")
+        assert "社招" in agent.instructions
+
     def test_form_agent(self):
         agent = create_form_agent("Google")
         assert "Form_Google" == agent.name
         assert len(agent.tools) == 11
+
+    def test_form_agent_with_type(self):
+        agent = create_form_agent("Google", "社招")
+        assert "社招" in agent.instructions
 
     def test_orchestrator(self):
         info = UserInfo(personal_info=PersonalInfo(name="测试"))
@@ -271,8 +287,8 @@ class TestAgentCreation:
     def test_orchestrator_multiple_companies(self):
         info = UserInfo(personal_info=PersonalInfo(name="测试"))
         companies = [
-            CompanyState(company_name="Google"),
-            CompanyState(company_name="Meta"),
+            CompanyState(company_name="Google", recruitment_type="校招"),
+            CompanyState(company_name="Meta", recruitment_type="社招"),
         ]
         orch = create_orchestrator(info, companies)
         assert len(orch.handoffs) == 4

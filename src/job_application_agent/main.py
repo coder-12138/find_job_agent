@@ -3,13 +3,13 @@ import sys
 
 from job_application_agent.config import Settings
 from job_application_agent.user_info.parser import load_user_info
-from job_application_agent.context import CompanyState
+from job_application_agent.context import CompanyState, RECRUITMENT_TYPES
 from job_application_agent.agents.orchestrator import run_job_application
 
 
 def main():
     print("=" * 60)
-    print("🎓 校招简历自动投递Agent")
+    print("🎓 简历自动投递Agent")
     print("=" * 60)
 
     settings = Settings()
@@ -36,7 +36,9 @@ def main():
     print(f"\n📋 用户信息摘要:")
     print(user_info.to_summary())
 
-    companies = _collect_company_input()
+    recruitment_type = _ask_recruitment_type()
+
+    companies = _collect_company_input(recruitment_type)
 
     if not companies:
         print("\n未输入任何公司，退出。")
@@ -44,7 +46,7 @@ def main():
 
     parallel = _ask_parallel_mode()
 
-    print(f"\n🚀 开始处理 {len(companies)} 家公司的投递（{'并行' if parallel else '顺序'}模式）...")
+    print(f"\n🚀 开始处理 {len(companies)} 家公司的投递（{'并行' if parallel else '顺序'}模式，{recruitment_type}）...")
     results = asyncio.run(run_job_application(user_info, companies, parallel=parallel))
 
     print("\n" + "=" * 60)
@@ -60,9 +62,22 @@ def main():
             print(f"  错误: {result.get('error_message') or result.get('error')}")
 
 
-def _collect_company_input() -> list[CompanyState]:
+def _ask_recruitment_type() -> str:
+    print("\n📌 请选择投递类型:")
+    for i, rt in enumerate(RECRUITMENT_TYPES, 1):
+        print(f"  {i}. {rt}")
+    while True:
+        choice = input("请输入编号（1-4）: ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(RECRUITMENT_TYPES):
+            selected = RECRUITMENT_TYPES[int(choice) - 1]
+            print(f"  ✅ 已选择: {selected}")
+            return selected
+        print("  ❌ 无效输入，请重新选择")
+
+
+def _collect_company_input(recruitment_type: str) -> list[CompanyState]:
     companies = []
-    print("\n📝 请输入要投递的公司信息（输入空行结束）:")
+    print(f"\n📝 请输入要投递的公司信息（投递类型: {recruitment_type}，输入空行结束）:")
     print("-" * 40)
 
     while True:
@@ -77,12 +92,13 @@ def _collect_company_input() -> list[CompanyState]:
 
         company = CompanyState(
             company_name=company_name,
+            recruitment_type=recruitment_type,
             referral_code=referral_code,
             job_keywords=job_keywords,
             preferred_cities=preferred_cities,
         )
         companies.append(company)
-        print(f"  ✅ 已添加: {company_name}")
+        print(f"  ✅ 已添加: {company_name}（{recruitment_type}）")
 
     return companies
 

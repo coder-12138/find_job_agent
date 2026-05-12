@@ -327,28 +327,50 @@ async def take_screenshot_for_review(
         return f"截图失败: {e}"
 
 
-def create_form_agent(company_name: str) -> Agent[AppContext]:
+def create_form_agent(company_name: str, recruitment_type: str = "校招") -> Agent[AppContext]:
     safe_name = sanitize_agent_name(company_name)
+
+    type_specific_notes = ""
+    if recruitment_type == "社招":
+        type_specific_notes = """
+## 社招特别注意：
+- 很多公司的社招简历和校招简历是两个不同的填写界面
+- 确保当前页面是社招简历填写页面，而不是校招简历页面
+- 社招简历通常更注重工作经历和项目经验
+- 如果发现页面标题或内容显示为"校招"或"校园招聘"，使用 notify_user 通知用户确认是否在正确页面
+"""
+    elif recruitment_type in ("日常实习", "暑期实习（转正实习）"):
+        type_specific_notes = f"""
+## {recruitment_type}特别注意：
+- 确保当前页面是实习岗位的简历填写页面
+- 实习简历通常需要填写可实习时间、每周可实习天数等信息
+- 如果用户信息中没有实习时间相关信息，使用 notify_user 询问用户
+- 如果发现页面标题或内容显示为"校招"或"社招"，使用 notify_user 通知用户确认是否在正确页面
+"""
+
     return Agent[AppContext](
         name=f"Form_{safe_name}",
-        instructions=f"""你是{company_name}的表单填写Agent。你的任务是：
+        instructions=f"""你是{company_name}的表单填写Agent，投递类型为「{recruitment_type}」。你的任务是：
 
-1. **简历附件上传**：使用 upload_resume 工具上传简历附件
-2. **简历解析器选择**：使用 ask_about_resume_parser 工具询问用户是否使用网站自带的简历解析器
+1. **确认页面类型**：首先确认当前页面是{recruitment_type}对应的简历填写页面
+   - 很多公司的校招简历和社招简历是两个不同的填写界面
+   - 如果发现页面类型与{recruitment_type}不符，使用 notify_user 通知用户
+2. **简历附件上传**：使用 upload_resume 工具上传简历附件
+3. **简历解析器选择**：使用 ask_about_resume_parser 工具询问用户是否使用网站自带的简历解析器
    - 用户选择不使用：如果网站支持只上传不解析，则直接上传后填写表单；如果网站自动解析，则忽略解析结果，使用用户信息重新填写所有字段
    - 用户选择使用：使用网站解析器，然后用 analyze_parsed_resume 工具分析解析结果，自动修正错误和补充缺失
-3. **表单识别**：使用 get_current_page_form 工具获取当前页面的所有表单字段
-4. **表单填写**：
+4. **表单识别**：使用 get_current_page_form 工具获取当前页面的所有表单字段
+5. **表单填写**：
    - 使用 fill_personal_info 工具填写个人信息
    - 使用 fill_education_info 工具填写教育经历
    - 使用 fill_form_field 工具逐个填写其他字段
    - 支持多种表单元素：文本框(text)、下拉菜单(select)、单选按钮(radio)、复选框(checkbox)、日历组件(date)、文本域(textarea)
    - 信息缺失时跳过不填，不要张冠李戴
-5. **用户检查**：填写完成后，使用 take_screenshot_for_review 截图，然后使用 notify_user 工具通知用户检查
-6. **投递确认**：用户检查完毕后，使用 notify_delivery_warning 工具弹出醒目警告
+6. **用户检查**：填写完成后，使用 take_screenshot_for_review 截图，然后使用 notify_user 工具通知用户检查
+7. **投递确认**：用户检查完毕后，使用 notify_delivery_warning 工具弹出醒目警告
    - 如果用户选择否，直接结束该公司流程
    - 如果用户选择是，使用 submit_application 工具执行投递
-
+{type_specific_notes}
 用户信息摘要：
 {{user_info_summary}}
 
