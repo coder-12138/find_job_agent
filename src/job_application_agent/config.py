@@ -1,3 +1,4 @@
+import glob
 import os
 import sys
 import tempfile
@@ -22,7 +23,7 @@ class Settings:
         self._parse_settings()
 
     def _load_env(self):
-        env_path = Path(__file__).parent.parent.parent.parent / ".env"
+        env_path = Path(__file__).parent.parent.parent / ".env"
         if env_path.exists():
             load_dotenv(env_path)
         else:
@@ -41,8 +42,17 @@ class Settings:
         self.smtp_sender_password = os.getenv("SMTP_SENDER_PASSWORD", "")
         self.smtp_recipient_email = os.getenv("SMTP_RECIPIENT_EMAIL", "")
 
-        self.resume_file_path = os.getenv("RESUME_FILE_PATH", "./data/resume.pdf")
-        self.personal_info_file_path = os.getenv("PERSONAL_INFO_FILE_PATH", "./data/personal_info.json")
+        project_root = str(Path(__file__).parent.parent.parent)
+
+        self.personal_info_file_path = os.getenv(
+            "PERSONAL_INFO_FILE_PATH",
+            os.path.join(project_root, "data", "personal_information.txt"),
+        )
+
+        resume_dir = os.path.join(project_root, "resume_personal_info")
+        self.resume_file_path = os.getenv("RESUME_FILE_PATH", "")
+        if not self.resume_file_path:
+            self.resume_file_path = self._find_resume_pdf(resume_dir)
 
         self.browser_headless = os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
         self.browser_timeout = int(os.getenv("BROWSER_TIMEOUT", "30000"))
@@ -50,10 +60,19 @@ class Settings:
         self.has_desktop = self._detect_desktop()
 
         self.read_only_dirs = [
-            os.path.dirname(os.path.abspath(self.resume_file_path)),
             os.path.dirname(os.path.abspath(self.personal_info_file_path)),
         ]
+        if self.resume_file_path:
+            self.read_only_dirs.append(os.path.dirname(os.path.abspath(self.resume_file_path)))
         self.write_only_dirs = [tempfile.gettempdir()]
+
+    def _find_resume_pdf(self, directory: str) -> str:
+        if not os.path.isdir(directory):
+            return ""
+        pdf_files = glob.glob(os.path.join(directory, "*.pdf"))
+        if pdf_files:
+            return pdf_files[0]
+        return ""
 
     def _detect_desktop(self) -> bool:
         if sys.platform == "linux":

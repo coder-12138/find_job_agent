@@ -161,15 +161,23 @@ def create_search_agent(company_name: str) -> Agent[AppContext]:
 
 1. 使用 search_company_website 工具搜索{company_name}的校招官网
 2. 使用 navigate_and_find_positions 工具导航到官网并查找岗位
-3. 使用 find_max_positions 工具查找该公司校招可投递的最大岗位数n
-4. 使用 get_position_details 工具获取每个候选岗位的详细信息
-5. 根据用户的简历信息和岗位要求，推荐2n个最匹配的岗位
+3. 使用 find_max_positions 工具查找该公司校招可投递的最大岗位数n（返回结果中会包含n的具体数字）
+4. 根据发现的n计算推荐岗位数：
+   - 如果找到了n，则推荐 2*n 个岗位
+   - 如果未找到n（返回"未知"），则默认推荐 6 个岗位
+5. 使用 get_position_details 工具获取每个候选岗位的详细信息
+6. 从所有候选岗位中，筛选出最匹配的岗位（基于用户简历和岗位要求）
+
+重要提醒：
+- 必须先完成步骤3获取n的值，才能确定推荐岗位数量
+- 如果n=3，则推荐6个岗位；如果n=5，则推荐10个岗位
+- 如果官网未说明n，则按6个岗位进行推荐
 
 每个推荐岗位必须包含：
 - 岗位名称
 - 工作地点
 - 完整 Job Description
-- 推荐理由（基于用户简历和岗位要求的匹配度分析）
+- 推荐理由（基于用户简历和岗位要求的匹配度分析，从高到低排序）
 
 用户信息摘要：
 {{user_info_summary}}
