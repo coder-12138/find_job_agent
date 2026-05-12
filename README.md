@@ -87,64 +87,73 @@ PYTHONPATH=src python -m job_application_agent.main
 
 ```txt
 # 基础信息
-姓名：朱一鸣
-英文名：zhu yi ming
+姓名：张三
+英文名：Zhang San
 性别：男
-邮箱：zhu-yiming@foxmail.com
-出生日期：2001-09-21
+邮箱：zhangsan@example.com
+出生日期：2000-06-15
 民族：汉族
-电话：18001894228
+电话：13800138000
 证件号码类型：身份证
-证件号码：310116200109216418
-政治面貌：群众
+证件号码：110101200006150000
+政治面貌：共青团员
 婚姻状况：未婚
-户籍：上海
-籍贯：浙江省衢州市
-现居住城市：上海
-邮编：201108
-血型：O型
-紧急联系人：俞霖
-紧急联系人电话：18049884228
+户籍：北京
+籍贯：北京市
+现居住城市：北京
+邮编：100000
+血型：A型
+紧急联系人：李四
+紧急联系人电话：13900139000
 
 # 求职意向
 算法工程师
-Agent开发工程师
+AI 开发工程师
 
 # 教育经历
-## 上海科技大学
-就读时间：2024-09 至 2027-06
-专业：生物医学工程
+## 北京大学
+就读时间：2022-09 至 2025-06
+专业：计算机科学与技术
 学历：硕士研究生
-GPA：3.3
-排名：前20%
-学院：生物医学工程学院
+GPA：3.8/4.0
+排名：前10%
+学院：计算机学院
 
-## 山东大学
-就读时间：2020-09 至 2024-06
-专业：电子信息工程
+## 武汉大学
+就读时间：2018-09 至 2022-06
+专业：软件工程
 学历：本科
-GPA：82.3
+GPA：3.7/4.0
 
 # 实习经历
-## 联影医疗
-实习时间：2025-04 至 2025-08
-部门：中央研究院
-岗位：科研合作岗
+## 字节跳动
+实习时间：2024-03 至 2024-09
+部门：AI Lab
+岗位：算法实习生
 工作内容：
-1. 图形化界面助力人工数据标注
-2. 参与论文写作
+1. 负责推荐系统算法优化
+2. 使用深度学习模型提升推荐准确率5%
+
+# 项目经历
+## 智能对话系统
+开展时间：2023-09
+依托单位：北京大学
+背景&任务：基于大语言模型开发智能对话系统
+数据预处理：将多轮对话数据处理成训练格式
+方法：采用 Transformer 架构，实现多轮上下文记忆
+核心成果：支持多轮对话和知识检索，开源在 GitHub
 
 # 奖惩情况
-1. ACM竞赛
-   级别：国家级
+1. ACM-ICPC区域赛
+   级别：省级
    奖项：金奖
-   获奖时间：2023-05
+   获奖时间：2021-11
 
 # 论文和著作
-1. Deep Learning for Medical Imaging
-   发表会议：ISMRM 2026
-   发表时间：2026-05
-   发表形式：Traditional Poster
+1. A Study on Deep Learning
+   发表会议：NeurIPS 2025
+   发表时间：2025-12
+   发表形式：Oral
 ```
 
 ### JSON 格式示例
@@ -152,24 +161,74 @@ GPA：82.3
 ```json
 {
   "personal_info": {
-    "name": "朱一鸣",
+    "name": "张三",
     "gender": "男",
-    "email": "zhu-yiming@foxmail.com",
-    "phone": "18001894228"
+    "birthday": "2000-06-15",
+    "phone": "13800138000",
+    "email": "zhangsan@example.com",
+    "id_number": "110101200006150000",
+    "nationality": "中国",
+    "ethnicity": "汉族",
+    "political_status": "共青团员",
+    "marital_status": "未婚",
+    "province": "北京",
+    "city": "北京",
+    "address": "北京市海淀区XX路XX号",
+    "wechat": "zhangsan_wx"
   },
   "education": [
     {
-      "school": "上海科技大学",
+      "school": "北京大学",
       "degree": "硕士",
-      "major": "生物医学工程",
-      "start_date": "2024-09",
-      "end_date": "2027-06"
+      "major": "计算机科学与技术",
+      "start_date": "2022-09",
+      "end_date": "2025-06",
+      "gpa": "3.8/4.0",
+      "rank": "前10%"
+    },
+    {
+      "school": "武汉大学",
+      "degree": "本科",
+      "major": "软件工程",
+      "start_date": "2018-09",
+      "end_date": "2022-06",
+      "gpa": "3.7/4.0"
     }
   ],
-  "work_experience": [],
-  "project_experience": [],
-  "awards": [],
-  "skills": []
+  "work_experience": [
+    {
+      "company": "字节跳动",
+      "position": "算法实习生",
+      "start_date": "2024-03",
+      "end_date": "2024-09",
+      "description": "负责推荐系统算法优化，使用深度学习模型提升推荐准确率5%"
+    }
+  ],
+  "project_experience": [
+    {
+      "name": "智能对话系统",
+      "role": "核心开发",
+      "start_date": "2023-09",
+      "end_date": "2024-01",
+      "description": "基于大语言模型开发智能对话系统，支持多轮对话和知识检索",
+      "url": "https://github.com/example/chatbot"
+    }
+  ],
+  "awards": [
+    {
+      "name": "ACM-ICPC区域赛",
+      "level": "金奖",
+      "date": "2021-11",
+      "description": "ACM国际大学生程序设计竞赛亚洲区域赛金奖"
+    }
+  ],
+  "skills": [
+    {"name": "Python", "level": "熟练"},
+    {"name": "PyTorch", "level": "熟练"},
+    {"name": "C++", "level": "熟悉"},
+    {"name": "Linux", "level": "熟悉"}
+  ],
+  "self_introduction": "热爱技术，专注于人工智能和深度学习领域，有丰富的项目经验和实习经历。"
 }
 ```
 
