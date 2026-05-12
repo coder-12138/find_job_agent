@@ -1,0 +1,5 @@
+openai-agents>=0.14.2
+playwright>=1.40.0
+python-dotenv>=1.0.0
+plyer>=2.1.0
+pydantic>=2.0.0

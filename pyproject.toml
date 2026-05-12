@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "job-application-agent"
+version = "0.1.0"
+description = "自动校招简历投递Agent"
+requires-python = ">=3.12"
+dependencies = [
+    "openai-agents>=0.14.2",
+    "playwright>=1.40.0",
+    "python-dotenv>=1.0.0",
+    "plyer>=2.1.0",
+    "pydantic>=2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
