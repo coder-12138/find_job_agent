@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
-from agents import Agent, Runner, RunContextWrapper, handoff
+from agents import Agent, Runner, RunContextWrapper, handoff, RunConfig
+from agents.extensions.models.litellm_provider import LitellmProvider
 
 from job_application_agent.context import AppContext, CompanyState
 from job_application_agent.user_info.parser import UserInfo
 from job_application_agent.agents.search import create_search_agent
 from job_application_agent.agents.form import create_form_agent
 from job_application_agent.tools.notify import notify_user, _terminal_print, _get_user_input
+from job_application_agent.config import Settings
 
 
 def _build_instructions(ctx: RunContextWrapper[AppContext], agent: Agent[AppContext]) -> str:
@@ -48,47 +51,116 @@ def create_orchestrator(
     user_info: UserInfo,
     companies: list[CompanyState],
 ) -> Agent[AppContext]:
-    sub_agents = []
+    """创建协调主Agent"""
+    # 为每个公司创建对应的 Search Agent 和 Form Agent
+    all_agents = []
     for company in companies:
-        search_agent = create_search_agent(company.company_name, company.recruitment_type)
-        form_agent = create_form_agent(company.company_name, company.recruitment_type)
-        sub_agents.append(search_agent)
-        sub_agents.append(form_agent)
-
-    handoffs_list = []
-    for agent in sub_agents:
-        handoffs_list.append(
-            handoff(
-                agent=agent,
-                tool_description_override=f"交接给 {agent.name} 处理",
-            )
+        all_agents.append(
+            create_search_agent(company.company_name, company.recruitment_type)
         )
-
-    orchestrator = Agent[AppContext](
+        all_agents.append(
+            create_form_agent(company.company_name, company.recruitment_type)
+        )
+    
+    return Agent(
         name="Orchestrator",
         instructions=_build_instructions,
         tools=[notify_user],
-        handoffs=handoffs_list,
+        handoffs=all_agents,
     )
 
-    return orchestrator
+
+def _get_run_config(settings: Settings) -> RunConfig:
+    """创建 RunConfig，使用 LiteLLM 作为模型提供商"""
+    # 确保 LiteLLM 能读取到环境变量
+    # LiteLLM 使用 OPENAI_API_BASE (不是 OPENAI_BASE_URL)
+    os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
+    os.environ.setdefault("OPENAI_API_BASE", settings.openai_base_url)
+    
+    return RunConfig(
+        model=settings.openai_model,
+        model_provider=LitellmProvider(),
+        tracing_disabled=True,
+    )
+
+
+async def run_job_application(
+    user_info: UserInfo,
+    companies: list[CompanyState],
+    parallel: bool = False,
+) -> dict[str, Any]:
+    """运行简历投递流程"""
+    settings = Settings()
+    errors = settings.validate()
+    if errors:
+        for error in errors:
+            print(f"配置错误: {error}")
+        return {"status": "error", "errors": errors}
+    
+    if parallel:
+        results = await _run_parallel(user_info, companies, settings)
+    else:
+        results = await _run_sequential(user_info, companies, settings)
+    
+    return results
+
+
+async def _run_sequential(
+    user_info: UserInfo,
+    companies: list[CompanyState],
+    settings: Settings,
+) -> dict[str, Any]:
+    context = AppContext(
+        user_info=user_info,
+        companies=companies,
+        has_desktop=settings.has_desktop,
+    )
+    
+    recruitment_type = companies[0].recruitment_type if companies else "校招"
+    orchestrator = create_orchestrator(user_info, companies)
+    run_config = _get_run_config(settings)
+    
+    try:
+        result = await Runner.run(
+            orchestrator,
+            input=f"请开始{recruitment_type}简历投递流程。按照公司列表依次处理每个公司的搜索、表单填写和投递。",
+            context=context,
+            max_turns=100,
+            run_config=run_config,
+        )
+        
+        results = {}
+        for company in context.companies:
+            results[company.company_name] = {
+                "status": "submitted" if company.submitted else company.status,
+                "recommended_positions": company.recommended_positions,
+                "selected_positions": company.selected_positions,
+                "form_filled": company.form_filled,
+                "submitted": company.submitted,
+                "error_message": company.error_message,
+            }
+        
+        return results
+    finally:
+        from job_application_agent.browser.automation import BrowserAutomation
+        await BrowserAutomation.close_shared()
 
 
 async def _process_single_company(
     user_info: UserInfo,
     company: CompanyState,
-    headless: bool = True,
-    timeout: int = 30000,
+    settings: Settings,
 ) -> dict[str, Any]:
     context = AppContext(
         user_info=user_info,
         companies=[company],
         current_company_index=0,
     )
-
+    
     search_agent = create_search_agent(company.company_name, company.recruitment_type)
     form_agent = create_form_agent(company.company_name, company.recruitment_type)
-
+    run_config = _get_run_config(settings)
+    
     try:
         search_result = await Runner.run(
             search_agent,
@@ -100,6 +172,7 @@ async def _process_single_company(
             ),
             context=context,
             max_turns=20,
+            run_config=run_config,
         )
         company.status = "searched"
     except Exception as e:
@@ -110,7 +183,7 @@ async def _process_single_company(
             "status": "search_failed",
             "error": str(e),
         }
-
+    
     _terminal_print(
         f"{company.company_name} - 岗位搜索完成",
         f"请查看推荐岗位，选择要投递的岗位和志愿顺序，\n"
@@ -128,7 +201,7 @@ async def _process_single_company(
             "submitted": False,
             "form_filled": False,
         }
-
+    
     try:
         form_result = await Runner.run(
             form_agent,
@@ -137,6 +210,7 @@ async def _process_single_company(
             ),
             context=context,
             max_turns=30,
+            run_config=run_config,
         )
         company.form_filled = True
         company.status = "form_filled"
@@ -148,75 +222,16 @@ async def _process_single_company(
             "status": "form_failed",
             "error": str(e),
         }
-
+    
     return {
         "company_name": company.company_name,
-        "status": "submitted" if company.submitted else company.status,
-        "submitted": company.submitted,
+        "status": company.status,
+        "recommended_positions": company.recommended_positions,
+        "selected_positions": company.selected_positions,
         "form_filled": company.form_filled,
+        "submitted": company.submitted,
+        "error_message": company.error_message,
     }
-
-
-async def run_job_application(
-    user_info: UserInfo,
-    companies: list[CompanyState],
-    parallel: bool = False,
-) -> dict[str, Any]:
-    from job_application_agent.config import Settings
-    from job_application_agent.browser.automation import BrowserAutomation
-
-    settings = Settings()
-    errors = settings.validate()
-    if errors:
-        for error in errors:
-            print(f"配置错误: {error}")
-        return {"status": "error", "errors": errors}
-
-    if parallel:
-        results = await _run_parallel(user_info, companies, settings)
-    else:
-        results = await _run_sequential(user_info, companies, settings)
-
-    return results
-
-
-async def _run_sequential(
-    user_info: UserInfo,
-    companies: list[CompanyState],
-    settings: Settings,
-) -> dict[str, Any]:
-    context = AppContext(
-        user_info=user_info,
-        companies=companies,
-        has_desktop=settings.has_desktop,
-    )
-
-    recruitment_type = companies[0].recruitment_type if companies else "校招"
-    orchestrator = create_orchestrator(user_info, companies)
-
-    try:
-        result = await Runner.run(
-            orchestrator,
-            input=f"请开始{recruitment_type}简历投递流程。按照公司列表依次处理每个公司的搜索、表单填写和投递。",
-            context=context,
-            max_turns=100,
-        )
-
-        results = {}
-        for company in context.companies:
-            results[company.company_name] = {
-                "status": "submitted" if company.submitted else company.status,
-                "recommended_positions": company.recommended_positions,
-                "selected_positions": company.selected_positions,
-                "form_filled": company.form_filled,
-                "submitted": company.submitted,
-                "error_message": company.error_message,
-            }
-
-        return results
-    finally:
-        from job_application_agent.browser.automation import BrowserAutomation
-        await BrowserAutomation.close_shared()
 
 
 async def _run_parallel(
@@ -229,14 +244,13 @@ async def _run_parallel(
         task = _process_single_company(
             user_info,
             company,
-            headless=settings.browser_headless,
-            timeout=settings.browser_timeout,
+            settings,
         )
         tasks.append(task)
-
+    
     try:
         task_results = await asyncio.gather(*tasks, return_exceptions=True)
-
+        
         results = {}
         for i, task_result in enumerate(task_results):
             company = companies[i]
@@ -249,7 +263,7 @@ async def _run_parallel(
                 }
             else:
                 results[company.company_name] = task_result
-
+        
         return results
     finally:
         from job_application_agent.browser.automation import BrowserAutomation

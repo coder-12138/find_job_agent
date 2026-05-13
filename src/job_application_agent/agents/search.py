@@ -31,9 +31,12 @@ async def search_company_website(
     try:
         browser = await _get_browser()
         search_query = f"{company_name} {recruitment_type} 官网 招聘"
-        search_url = f"https://www.bing.com/search?q={search_query}"
-        await browser.navigate(search_url)
-        await browser.page.wait_for_load_state("domcontentloaded")
+        
+        # 使用 search_and_navigate 方法，它会自动编码URL并尝试多个搜索引擎
+        page_text = await browser.search_and_navigate(search_query)
+        
+        if not page_text:
+            return "搜索失败: 无法访问搜索引擎"
 
         keywords = RECRUITMENT_TYPE_KEYWORDS.get(recruitment_type, ["招聘"])
         all_keywords = keywords + ["招聘", "career", "job"]

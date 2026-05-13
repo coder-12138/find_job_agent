@@ -5,6 +5,15 @@ import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
 
+from agents import set_tracing_disabled
+from agents.models._openai_shared import set_use_responses_by_default
+
+# 必须禁用 Responses API，只使用 Chat Completions
+set_use_responses_by_default(False)
+
+# 禁用追踪（因为我们没有 OpenAI 平台的 API key）
+set_tracing_disabled(True)
+
 
 class Settings:
     _instance = None
@@ -31,7 +40,8 @@ class Settings:
 
     def _parse_settings(self):
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
-        self.openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        # 优先使用 OPENAI_API_BASE (LiteLLM 使用)，其次使用 OPENAI_BASE_URL
+        self.openai_base_url = os.getenv("OPENAI_API_BASE", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
         self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
 
         self.email_notification_enabled = os.getenv("EMAIL_NOTIFICATION_ENABLED", "false").lower() == "true"

@@ -2,7 +2,7 @@
 
 ## Overview
 
-- **Summary**: 一个基于 `openai-agents` 包（版本 > 0.14.1）的智能简历投递Agent，能够根据用户提供的简历和个人信息文档，自动完成校招网申的批量投递工作。
+- **Summary**: 一个基于 LangChain 和 LangGraph 框架的智能简历投递Agent，能够根据用户提供的简历和个人信息文档，自动完成校招网申的批量投递工作。
 - **Purpose**: 解决校招网申过程中重复填写简历、筛选岗位等繁琐工作，提高求职效率。
 - **Target Users**: 正在进行校招网申的应届毕业生或求职者。
 
@@ -17,6 +17,7 @@
 - 遇到问题时主动寻求用户帮助
 - 使用.env文件配置API信息
 - 使用专门的conda环境开发
+- **智能记忆功能**：自动记录用户补充的个人信息，避免重复询问
 
 ## Non-Goals (Out of Scope)
 
@@ -26,7 +27,7 @@
 - 修改已投递的志愿
 
 ## Background & Context
-- 使用 `openai-agents` 包（版本 > 0.14.1）作为核心框架，**采用多 agent 架构**
+- 使用 **LangChain** 和 **LangGraph** 作为核心框架，采用图结构编排多 Agent 工作流
 - 需要处理各种不同的招聘网站UI结构
 - 需要理解和填写各种表单元素（文本框、下拉框、单选按钮、日历组件等）
 - 用户在使用前需要自行在.env中配置所用的模型的API key和url等信息
@@ -35,74 +36,138 @@
   - **Linux服务器**（SSH连接，无桌面环境）：仅终端通知，无需弹窗
   - **macOS**（终端命令行）：支持系统弹窗通知+ 终端通知
 
-### 多 Agent 架构设计
-采用 **分层编排 + 并行处理 + 职责细分** 的多 agent 架构：
+### 多 Agent 架构设计（LangGraph 图结构）
+
+采用 **LangGraph 状态图 + 节点路由 + 持久化记忆** 的多 Agent 架构：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              Orchestrator Agent（协调主 Agent）                 │
-│  - 接收用户输入，管理全局状态                                    │
-│  - 协调各子 Agent 工作                                          │
-│  - 处理用户交互（Human-in-the-loop）                             │
+│                    LangGraph StateGraph                         │
+│                                                                 │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐        │
+│  │   START     │───▶│  Orchestrator│───▶│  Router     │        │
+│  │   Node      │    │   Node      │    │  Node       │        │
+│  └─────────────┘    └─────────────┘    └──────┬──────┘        │
+│                                               │                 │
+│                    ┌──────────────────────────┘                 │
+│                    │                                            │
+│         ┌─────────┴─────────┐                                  │
+│         ▼                   ▼                                  │
+│  ┌─────────────┐    ┌─────────────┐                           │
+│  │ Search Agent │    │ Form Agent  │                           │
+│  │   Node      │    │   Node      │                           │
+│  │ (per company)│   │ (per company)│                           │
+│  └──────┬──────┘    └──────┬──────┘                           │
+│         │                   │                                  │
+│         └─────────┬─────────┘                                  │
+│                   ▼                                            │
+│  ┌─────────────────────────────────┐                          │
+│  │      Human-in-the-loop Node     │                          │
+│  │   (interrupt / ask / confirm)   │                          │
+│  └─────────────┬───────────────────┘                          │
+│                │                                               │
+│                ▼                                               │
+│  ┌─────────────────────────────────┐                          │
+│  │      Memory Update Node         │                          │
+│  │  (save user answers to memory)  │                          │
+│  └─────────────┬───────────────────┘                          │
+│                │                                               │
+│                ▼                                               │
+│  ┌─────────────────────────────────┐                          │
+│  │         END Node                │                          │
+│  └─────────────────────────────────┘                          │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Persistent Memory Store                     │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │   │
+│  │  │  User Info  │  │  Learned    │  │  Conversation│     │   │
+│  │  │  (from docs)│  │  Fields     │  │  History    │     │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘     │   │
+│  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  Company X Flow │  │  Company Y Flow │  │  Company Z Flow │
-│  (可并行)       │  │  (可并行)       │  │  (可并行)       │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  Search Agent   │  │  Search Agent   │  │  Search Agent   │
-│  - 搜索公司官网 │  │  - 搜索公司官网 │  │  - 搜索公司官网 │
-│  - 查找岗位信息 │  │  - 查找岗位信息 │  │  - 查找岗位信息 │
-│  - 岗位匹配推荐 │  │  - 岗位匹配推荐 │  │  - 岗位匹配推荐 │
-│  - 随时调用通知 │  │  - 随时调用通知 │  │  - 随时调用通知 │
-│    Tool          │  │    Tool          │  │    Tool          │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Form Agent    │  │   Form Agent    │  │   Form Agent    │
-│  - 简历附件上传 │  │  - 简历附件上传 │  │  - 简历附件上传 │
-│  - 简历解析处理 │  │  - 简历解析处理 │  │  - 简历解析处理 │
-│  - 表单自动填写 │  │  - 表单自动填写 │  │  - 表单自动填写 │
-│  (下拉/单选/日 │  │  (下拉/单选/日 │  │  (下拉/单选/日 │
-│   历等)         │  │   历等)         │  │   历等)         │
-│  - 投递确认与   │  │  - 投递确认与   │  │  - 投递确认与   │
-│    执行（可选） │  │    执行（可选） │  │    执行（可选） │
-│  - 随时调用通知 │  │  - 随时调用通知 │  │  - 随时调用通知 │
-│    Tool          │  │    Tool          │  │    Tool          │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              │
-                              ▼
-                   ┌───────────────────────────┐
-                   │  通知 Tool (Notify User)  │
-                   │  - 终端打印（全平台）     │
-                   │  - 系统弹窗（Windows/macOS）│
-                   │  - 邮件通知（可选）        │
-                   │  - 支持用户确认输入        │
-                   └───────────────────────────┘
 ```
 
 **架构说明**：
-- **Orchestrator Agent**：使用 handoffs 和 agent-as-tool 模式协调子 Agent
-- **Search Agent**：每个公司一个独立实例，专门负责搜索官网、查找岗位，可随时调用通知 Tool
-- **Form Agent**：每个公司一个独立实例，专注处理各种表单组件，并包含投递确认与执行功能，可随时调用通知 Tool
-- **通知 Tool**：所有 Agent 共享的通用 Tool，用于随时通知用户，支持终端打印、系统弹窗、邮件通知，可根据需要等待用户确认
+- **LangGraph StateGraph**：使用 LangGraph 的 `StateGraph` 定义整个工作流，状态在节点间传递
+- **Orchestrator Node**：主协调节点，接收用户输入，管理全局状态，决定路由到 Search 还是 Form
+- **Router Node**：根据当前状态决定下一步执行哪个节点（Search / Form / Human-in-the-loop / End）
+- **Search Agent Node**：每个公司一个实例，专门负责搜索官网、查找岗位，可随时调用通知 Tool
+- **Form Agent Node**：每个公司一个实例，专注处理各种表单组件，并包含投递确认与执行功能，可随时调用通知 Tool
+- **Human-in-the-loop Node**：LangGraph 的 `interrupt` 机制，暂停执行等待用户输入（岗位选择、信息补充、投递确认等）
+- **Memory Update Node**：用户回答问题后，将新信息写入持久化记忆存储
+- **Persistent Memory Store**：使用 LangChain 的 memory 组件或外部存储（如 SQLite/JSON 文件），存储三类记忆：
+  - **User Info**：从 `personal_information.txt` 和 PDF 简历解析的原始信息
+  - **Learned Fields**：用户在使用过程中补充的个人信息（如缺失的必填项）
+  - **Conversation History**：多轮对话历史，支持上下文理解
+- **通知 Tool**：所有 Agent 共享的通用 Tool，用于随时通知用户，支持终端打印、系统弹窗、邮件通知
 
-### 工作流程
-对于每个公司（可并行处理）：
-1. Orchestrator 启动该公司的 Search Agent
-2. Search Agent 搜索公司官网，查找并推荐岗位
-3. **用户决定投递的岗位并自行注册账号**，进入简历创建页面
-4. Orchestrator 启动该公司的 Form Agent
-5. Form Agent 完成简历填写后，弹出醒目警告，询问用户是否由 AI 进行投递
-6. 若用户选择否，直接结束该公司流程
-7. 若用户选择是，Form Agent 执行投递操作
+### 记忆功能详细设计
+
+#### 记忆存储结构
+
+```python
+class AgentMemory(BaseModel):
+    """Agent 持久化记忆结构"""
+
+    # 从文档解析的原始个人信息
+    source_user_info: Dict[str, Any] = Field(default_factory=dict)
+
+    # 用户在使用过程中补充的信息（核心记忆功能）
+    learned_fields: Dict[str, Any] = Field(default_factory=dict)
+
+    # 每个字段的记录元数据（何时、因何原因记录）
+    field_metadata: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+    # 公司已处理记录（避免重复处理）
+    company_history: List[Dict[str, Any]] = Field(default_factory=list)
+
+    def get_field(self, field_name: str) -> Any:
+        """获取字段值，优先从 learned_fields 查找，再从 source_user_info 查找"""
+        ...
+
+    def set_field(self, field_name: str, value: Any, reason: str = "") -> None:
+        """记录用户补充的字段，附带原因和timestamp"""
+        ...
+```
+
+#### 记忆工作流程
+
+1. **信息加载阶段**：
+   - Agent 启动时，读取 `personal_information.txt` 和 PDF 简历
+   - 解析并存储到 `source_user_info`
+   - 同时加载之前保存的 `learned_fields`（如有）
+
+2. **表单填写阶段**：
+   - Form Agent 遇到必填字段时，调用 `get_field(field_name)`
+   - 如果返回值为空（信息缺失）：
+     a. 通过 Human-in-the-loop Node 暂停执行
+     b. 调用通知 Tool 询问用户该字段的值
+     c. 用户回答后，调用 `set_field(field_name, value, reason)` 记录到 `learned_fields`
+     d. 将新值填入表单
+     e. 继续执行后续流程
+   - 如果返回值非空：直接填入表单，不再询问
+
+3. **记忆持久化**：
+   - 每次 `set_field` 后，自动保存到本地 JSON/SQLite 文件
+   - 下次启动 Agent 时自动加载
+
+4. **记忆查看与管理（可选）**：
+   - 提供命令让用户查看已记录的所有字段
+   - 提供命令让用户修改或删除已记录的字段
+
+### 工作流程（LangGraph 状态流转）
+
+对于每个公司（可并行处理，每个公司一个子图）：
+1. 用户输入公司列表、岗位关键词、工作城市等参数 → Orchestrator Node
+2. Router Node 判断当前状态，路由到 Search Agent Node
+3. Search Agent Node 搜索公司官网，查找并推荐岗位
+4. **Human-in-the-loop**：用户决定投递的岗位并自行注册账号，进入简历创建页面
+5. Router Node 路由到 Form Agent Node
+6. Form Agent Node 完成简历填写
+   - 遇到缺失必填项 → Human-in-the-loop Node 询问用户 → Memory Update Node 记录答案 → 继续填写
+7. **Human-in-the-loop**：弹出醒目警告，询问用户是否由 AI 进行投递
+8. 若用户选择否 → 结束该公司流程
+9. 若用户选择是 → Form Agent Node 执行投递操作 → 结束
 
 ## Functional Requirements
 
@@ -127,22 +192,26 @@
 - **FR-19**: 邮件发送配置在.env中设置（发件邮箱、SMTP服务器等）
 - **FR-20**: 提供详细的邮箱设置教程
 - **FR-21**: 在Linux服务器（SSH）和无桌面环境下降级为纯终端通知，不报错
+- **FR-22**: **记忆功能**：自动记录用户补充的个人信息，下次遇到相同字段直接使用，不再重复询问
+- **FR-23**: **记忆持久化**：用户补充的信息保存到本地，下次启动 Agent 自动加载
+- **FR-24**: **记忆查看**：提供方式让用户查看已记录的所有补充信息
 
 ## Non-Functional Requirements
 - **NFR-1**: 交互响应时间 < 5秒
 - **NFR-2**: 支持至少5家主流招聘网站
-- **NFR-3**: 用户信息安全存储（不持久化敏感信息）
+- **NFR-3**: 用户信息安全存储（不持久化敏感信息到外部）
 - **NFR-4**: 平台兼容性：Windows（终端+弹窗）、Linux服务器（SSH终端）、macOS（终端+弹窗）
+- **NFR-5**: 记忆数据本地存储，不上传云端，保护隐私
 
 ## Constraints
-- **Technical**: 必须使用 `openai-agents` 包（通过 `pip install openai-agents` 安装），**版本 > 0.14.1**，Python语言，使用Playwright浏览器自动化工具；**必须启用沙箱功能**限制 Agent 文件系统访问权限
-- **Security**: Agent 只能读取用户指定的简历/个人信息目录，只能写入系统临时目录；禁止修改系统配置和用户主目录下的重要文件
+- **Technical**: 必须使用 **LangChain** 和 **LangGraph** 框架（通过 `pip install langchain langgraph` 安装），Python语言，使用Playwright浏览器自动化工具；使用 LangGraph 的 `interrupt` 机制实现 Human-in-the-loop
+- **Security**: Agent 只能读取用户指定的简历/个人信息目录，只能写入系统临时目录和记忆存储文件；禁止修改系统配置和用户主目录下的重要文件
 - **Business**: 不保证所有网站兼容，部分网站可能需要手动干预
-- **Dependencies**: OpenAI API, Playwright, python-dotenv
+- **Dependencies**: OpenAI API (或其他LLM API), Playwright, python-dotenv, langchain, langgraph
 
 ## Assumptions
 
-- 用户能提供完整的简历和个人信息文档
+- 用户能提供完整的简历和个人信息文档（允许部分信息缺失，会通过记忆功能逐步补充）
 - 用户愿意在必要时手动辅助解决问题
 - 用户有目标公司的招聘官网账号或愿意自行注册
 - 用户会在使用前配置好.env文件中的API信息
@@ -191,11 +260,30 @@
 - **Then**: Agent使用日历组件选择正确的日期，精确到月或日根据网站要求
 - **Verification**: `programmatic`
 
-### AC-6: 信息缺失处理
+### AC-6: 信息缺失处理（基础）
 
 - **Given**: 表单需要填写的信息在用户提供的文档中不存在
 - **When**: Agent遇到缺失信息的字段
 - **Then**: Agent跳过该字段，不填写任何内容，不张冠李戴
+- **Verification**: `programmatic`
+
+### AC-6b: 信息缺失处理（记忆功能 - 必填项）
+
+- **Given**: 表单需要填写的信息是**必填项**，且在用户提供的文档中不存在
+- **When**: Agent遇到该缺失必填项
+- **Then**: 
+  1. Agent暂停执行（LangGraph interrupt）
+  2. Agent通过通知 Tool 询问用户该字段的值
+  3. 用户回答后，Agent记录该字段到记忆存储
+  4. Agent使用该值填写表单
+  5. 下次遇到相同字段时，Agent直接从记忆中获取，不再询问
+- **Verification**: `programmatic` + `human-judgment`
+
+### AC-6c: 记忆持久化验证
+
+- **Given**: 用户在某次运行中补充了某个字段的值
+- **When**: Agent下次启动并遇到相同字段
+- **Then**: Agent直接从本地记忆存储中读取该值，不再询问用户
 - **Verification**: `programmatic`
 
 ### AC-7: 简历附件上传
@@ -291,17 +379,17 @@
 - **Then**: 用户能成功配置并收到测试邮件
 - **Verification**: `human-judgment`
 
-### AC-19: 沙箱安全限制
+### AC-19: 记忆数据安全
 - **Given**: Agent 正在运行
-- **When**: Agent 尝试执行文件操作
+- **When**: Agent 记录用户补充的信息
 - **Then**: 
-  - 只能读取用户指定的简历/个人信息目录
-  - 只能写入系统临时目录
-  - 无法修改系统配置文件或用户主目录下的重要文件
+  - 数据仅保存在本地 JSON/SQLite 文件
+  - 不上传到任何外部服务
+  - 用户可以随时查看和删除
 - **Verification**: `programmatic`
 
 ## Open Questions
 
-- [ ] 新版OpenAI Agent SDK的具体包名和安装方式？
+- [ ] LangGraph 的 checkpoint 持久化存储选择（SQLite / JSON / 其他）？
 - [ ] 用户简历和个人信息文档的格式要求？
-
+- [ ] 记忆功能的数据结构是否需要支持字段别名（同一含义的不同字段名）？

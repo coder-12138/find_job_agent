@@ -36,11 +36,30 @@ class BrowserAutomation:
         if self._page is not None:
             return self._page
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        
+        # 启动参数，添加反检测措施
+        launch_args = []
+        if self.headless:
+            launch_args.append("--disable-blink-features=AutomationControlled")
+        
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless,
+            args=launch_args
+        )
+        
         self._context = await self._browser.new_context(
             viewport={"width": 1920, "height": 1080},
             locale="zh-CN",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
+        
+        # 注入脚本隐藏 webdriver 属性
+        await self._context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
+        
         self._context.set_default_timeout(self.timeout)
         self._page = await self._context.new_page()
         return self._page
@@ -64,12 +83,47 @@ class BrowserAutomation:
         return self._page
 
     async def navigate(self, url: str) -> bool:
-        try:
-            await self.page.goto(url, wait_until="domcontentloaded")
-            return True
-        except Exception as e:
-            print(f"[浏览器] 导航失败: {e}")
-            return False
+        """导航到指定URL，带重试机制"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 使用 load 等待策略，更稳定
+                response = await self.page.goto(
+                    url, 
+                    wait_until="load",
+                    timeout=self.timeout
+                )
+                if response:
+                    # 检查是否被拦截或返回错误状态
+                    if response.status >= 400:
+                        print(f"[浏览器] 页面返回错误状态码: {response.status}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return False
+                return True
+            except Exception as e:
+                error_msg = str(e)
+                # ERR_ABORTED 可能是页面跳转导致的，不一定是真正的失败
+                if "ERR_ABORTED" in error_msg:
+                    # 等待一下，检查页面是否实际已加载
+                    await asyncio.sleep(1)
+                    try:
+                        current_url = self.page.url
+                        if current_url and current_url != "about:blank":
+                            print(f"[浏览器] 页面已加载 (URL: {current_url})")
+                            return True
+                    except:
+                        pass
+                
+                print(f"[浏览器] 导航失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"[浏览器] 等待 {wait_time} 秒后重试...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    return False
+        return False
 
     async def get_page_content(self) -> str:
         return await self.page.content()
@@ -252,10 +306,34 @@ class BrowserAutomation:
         return path
 
     async def search_and_navigate(self, query: str) -> str:
-        search_url = f"https://www.bing.com/search?q={query}"
-        await self.navigate(search_url)
-        await asyncio.sleep(2)
-        return await self.get_page_text()
+        """使用搜索引擎搜索并返回页面文本"""
+        # 对查询进行编码
+        from urllib.parse import quote
+        encoded_query = quote(query)
+        
+        # 仅使用中国大陆可访问的搜索引擎
+        search_engines = [
+            f"https://www.bing.com/search?q={encoded_query}",
+            f"https://duckduckgo.com/html/?q={encoded_query}",
+        ]
+        
+        for i, search_url in enumerate(search_engines):
+            print(f"[浏览器] 使用搜索引擎 {i+1}: {search_url[:60]}...")
+            success = await self.navigate(search_url)
+            if success:
+                await asyncio.sleep(2)
+                # 检查是否被阻止或需要验证码
+                page_text = await self.get_page_text()
+                if "验证码" in page_text or "captcha" in page_text.lower():
+                    print("[浏览器] 检测到验证码，尝试下一个搜索引擎...")
+                    continue
+                if "访问被拒绝" in page_text or "access denied" in page_text.lower():
+                    print("[浏览器] 访问被拒绝，尝试下一个搜索引擎...")
+                    continue
+                return page_text
+            
+        print("[浏览器] 所有搜索引擎都失败")
+        return ""
 
     async def find_links(self, text_pattern: str = "") -> list[dict[str, str]]:
         links = []
