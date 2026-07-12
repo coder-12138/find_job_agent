@@ -17,7 +17,7 @@ async def _get_browser():
 
 
 @tool
-def search_company_website(
+async def search_company_website(
     company_name: str,
     recruitment_type: str = "校招",
 ) -> str:
@@ -27,45 +27,40 @@ def search_company_website(
         company_name: 公司名称
         recruitment_type: 投递类型（校招/社招/日常实习/暑期实习（转正实习）），默认校招
     """
-    import asyncio
+    try:
+        browser = await _get_browser()
+        search_query = f"{company_name} {recruitment_type} 官网 招聘"
 
-    async def _search():
-        try:
-            browser = await _get_browser()
-            search_query = f"{company_name} {recruitment_type} 官网 招聘"
-            
-            page_text = await browser.search_and_navigate(search_query)
-            
-            if not page_text:
-                return "搜索失败: 无法访问搜索引擎"
+        page_text = await browser.search_and_navigate(search_query)
 
-            keywords = RECRUITMENT_TYPE_KEYWORDS.get(recruitment_type, ["招聘"])
-            all_keywords = keywords + ["招聘", "career", "job"]
+        if not page_text:
+            return "搜索失败: 无法访问搜索引擎"
 
-            links = await browser.find_links("招聘")
-            results = []
-            for link in links[:10]:
+        keywords = RECRUITMENT_TYPE_KEYWORDS.get(recruitment_type, ["招聘"])
+        all_keywords = keywords + ["招聘", "career", "job"]
+
+        links = await browser.find_links("招聘")
+        results = []
+        for link in links[:10]:
+            text = link.get("text", "")
+            href = link.get("href", "")
+            if any(kw in text.lower() or kw in href.lower() for kw in all_keywords):
+                results.append(f"- {text}: {href}")
+
+        if not results:
+            all_links = await browser.find_links()
+            for link in all_links[:10]:
                 text = link.get("text", "")
                 href = link.get("href", "")
-                if any(kw in text.lower() or kw in href.lower() for kw in all_keywords):
-                    results.append(f"- {text}: {href}")
+                results.append(f"- {text}: {href}")
 
-            if not results:
-                all_links = await browser.find_links()
-                for link in all_links[:10]:
-                    text = link.get("text", "")
-                    href = link.get("href", "")
-                    results.append(f"- {text}: {href}")
-
-            return f"搜索到以下链接:\n" + "\n".join(results) if results else "未找到相关链接"
-        except Exception as e:
-            return f"搜索失败: {e}"
-
-    return asyncio.get_event_loop().run_until_complete(_search())
+        return f"搜索到以下链接:\n" + "\n".join(results) if results else "未找到相关链接"
+    except Exception as e:
+        return f"搜索失败: {e}"
 
 
 @tool
-def navigate_and_find_positions(
+async def navigate_and_find_positions(
     website_url: str,
     job_keywords: str,
     preferred_cities: str,
@@ -79,44 +74,39 @@ def navigate_and_find_positions(
         preferred_cities: 期望工作城市，多个城市用逗号分隔
         recruitment_type: 投递类型（校招/社招/日常实习/暑期实习（转正实习）），默认校招
     """
-    import asyncio
+    try:
+        browser = await _get_browser()
+        await browser.navigate(website_url)
+        await browser.page.wait_for_load_state("domcontentloaded")
 
-    async def _navigate():
-        try:
-            browser = await _get_browser()
-            await browser.navigate(website_url)
-            await browser.page.wait_for_load_state("domcontentloaded")
+        page_text = await browser.get_page_text()
+        page_url = await browser.get_current_url()
 
-            page_text = await browser.get_page_text()
-            page_url = await browser.get_current_url()
+        type_keywords = RECRUITMENT_TYPE_KEYWORDS.get(recruitment_type, ["校招"])
+        entry_links = []
+        for keyword in type_keywords:
+            found = await browser.find_links(keyword)
+            entry_links.extend(found)
+            if entry_links:
+                break
 
-            type_keywords = RECRUITMENT_TYPE_KEYWORDS.get(recruitment_type, ["校招"])
-            entry_links = []
-            for keyword in type_keywords:
-                found = await browser.find_links(keyword)
-                entry_links.extend(found)
-                if entry_links:
-                    break
+        link_info = ""
+        for link in entry_links[:5]:
+            link_info += f"- {link['text']}: {link['href']}\n"
 
-            link_info = ""
-            for link in entry_links[:5]:
-                link_info += f"- {link['text']}: {link['href']}\n"
-
-            type_label = recruitment_type
-            return (
-                f"当前页面: {page_url}\n"
-                f"投递类型: {type_label}\n"
-                f"页面内容摘要: {page_text[:2000]}\n"
-                f"{type_label}相关链接:\n{link_info if link_info else f'未找到{type_label}入口链接'}"
-            )
-        except Exception as e:
-            return f"导航失败: {e}"
-
-    return asyncio.get_event_loop().run_until_complete(_navigate())
+        type_label = recruitment_type
+        return (
+            f"当前页面: {page_url}\n"
+            f"投递类型: {type_label}\n"
+            f"页面内容摘要: {page_text[:2000]}\n"
+            f"{type_label}相关链接:\n{link_info if link_info else f'未找到{type_label}入口链接'}"
+        )
+    except Exception as e:
+        return f"导航失败: {e}"
 
 
 @tool
-def find_max_positions(
+async def find_max_positions(
     website_url: str,
     recruitment_type: str = "校招",
 ) -> str:
@@ -126,40 +116,35 @@ def find_max_positions(
         website_url: 招聘官网URL
         recruitment_type: 投递类型（校招/社招/日常实习/暑期实习（转正实习）），默认校招
     """
-    import asyncio
+    try:
+        browser = await _get_browser()
 
-    async def _find():
-        try:
-            browser = await _get_browser()
+        faq_keywords = ["FAQ", "常见问题", "帮助", "说明", "指南"]
+        found_faq = False
+        for keyword in faq_keywords:
+            links = await browser.find_links(keyword)
+            if links:
+                await browser.navigate(links[0]["href"])
+                found_faq = True
+                break
 
-            faq_keywords = ["FAQ", "常见问题", "帮助", "说明", "指南"]
-            found_faq = False
-            for keyword in faq_keywords:
-                links = await browser.find_links(keyword)
-                if links:
-                    await browser.navigate(links[0]["href"])
-                    found_faq = True
-                    break
+        if not found_faq:
+            await browser.navigate(website_url)
 
-            if not found_faq:
-                await browser.navigate(website_url)
+        page_text = await browser.get_page_text()
 
-            page_text = await browser.get_page_text()
-
-            type_label = recruitment_type
-            return (
-                f"页面内容:\n{page_text[:3000]}\n\n"
-                f"请根据以上页面内容，分析该公司{type_label}最多可投递几个岗位。"
-                f"如果未找到明确信息，请返回'未知'。"
-            )
-        except Exception as e:
-            return f"查找失败: {e}"
-
-    return asyncio.get_event_loop().run_until_complete(_find())
+        type_label = recruitment_type
+        return (
+            f"页面内容:\n{page_text[:3000]}\n\n"
+            f"请根据以上页面内容，分析该公司{type_label}最多可投递几个岗位。"
+            f"如果未找到明确信息，请返回'未知'。"
+        )
+    except Exception as e:
+        return f"查找失败: {e}"
 
 
 @tool
-def get_position_details(
+async def get_position_details(
     position_url: str,
 ) -> str:
     """获取岗位的详细信息，包括工作地点、JD等。
@@ -167,22 +152,17 @@ def get_position_details(
     Args:
         position_url: 岗位详情页URL
     """
-    import asyncio
+    try:
+        browser = await _get_browser()
+        await browser.navigate(position_url)
+        await browser.page.wait_for_load_state("domcontentloaded")
 
-    async def _get():
-        try:
-            browser = await _get_browser()
-            await browser.navigate(position_url)
-            await browser.page.wait_for_load_state("domcontentloaded")
+        page_text = await browser.get_page_text()
+        page_url = await browser.get_current_url()
 
-            page_text = await browser.get_page_text()
-            page_url = await browser.get_current_url()
-
-            return f"岗位详情页: {page_url}\n\n内容:\n{page_text[:3000]}"
-        except Exception as e:
-            return f"获取岗位详情失败: {e}"
-
-    return asyncio.get_event_loop().run_until_complete(_get())
+        return f"岗位详情页: {page_url}\n\n内容:\n{page_text[:3000]}"
+    except Exception as e:
+        return f"获取岗位详情失败: {e}"
 
 
 def get_search_tools():

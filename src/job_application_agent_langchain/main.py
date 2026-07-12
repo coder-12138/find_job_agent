@@ -5,12 +5,13 @@ from job_application_agent_langchain.config import Settings
 from job_application_agent_langchain.user_info.parser import load_user_info
 from job_application_agent_langchain.context import CompanyState, RECRUITMENT_TYPES
 from job_application_agent_langchain.agents.orchestrator import run_job_application
-from job_application_agent_langchain.memory import load_memory, save_memory, user_info_to_dict
+from job_application_agent_langchain.agent_events import CLIEmitter
+from job_application_agent_langchain.memory import load_memory, user_info_to_dict
 
 
 def main():
     print("=" * 60)
-    print("🎓 简历自动投递Agent (LangChain/LangGraph 重构版)")
+    print("🎓 简历自动投递Agent (LangChain/deepagents 重构版)")
     print("=" * 60)
 
     settings = Settings()
@@ -56,9 +57,10 @@ def main():
     parallel = _ask_parallel_mode()
 
     print(f"\n🚀 开始处理 {len(companies)} 家公司的投递（{'并行' if parallel else '顺序'}模式，{recruitment_type}）...")
-    results = asyncio.run(run_job_application(user_info, companies, parallel=parallel))
 
-    save_memory(memory, settings.memory_file_path)
+    # 使用 CLIEmitter 进行终端交互
+    emitter = CLIEmitter()
+    results = asyncio.run(run_job_application(user_info, companies, parallel=parallel, emitter=emitter))
 
     print("\n" + "=" * 60)
     print("📊 投递结果汇总:")
@@ -69,14 +71,8 @@ def main():
         print(f"  状态: {result.get('status', 'unknown')}")
         print(f"  表单填写: {'完成' if result.get('form_filled') else '未完成'}")
         print(f"  投递: {'已投递' if result.get('submitted') else '未投递'}")
-        if result.get("error_message") or result.get("error"):
-            print(f"  错误: {result.get('error_message') or result.get('error')}")
-
-    if memory.learned_fields:
-        print("\n📝 本次运行新记录的补充信息:")
-        for k, v in memory.learned_fields.items():
-            if k not in user_info_dict or not user_info_dict.get(k):
-                print(f"  - {k}: {v}")
+        if result.get("error"):
+            print(f"  错误: {result.get('error')}")
 
 
 def _ask_recruitment_type() -> str:
