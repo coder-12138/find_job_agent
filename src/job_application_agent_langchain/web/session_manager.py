@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import WebSocket
+from langchain_core.messages import HumanMessage
 
 from job_application_agent_langchain.agent_events import AgentEventEmitter
 from job_application_agent_langchain.agents.orchestrator import run_job_application
@@ -41,6 +42,12 @@ class SessionInfo:
     error: str = ""
     companies: list[CompanyState] = field(default_factory=list)
     parallel: bool = False
+    # 续接/中断重试所需的用户信息（重启 Agent 时复用）
+    user_info: UserInfo | None = None
+    # 对话历史消息列表（LangChain message 对象：HumanMessage / AIMessage）
+    message_history: list = field(default_factory=list)
+    # Agent 运行期间收到的用户消息队列，当前 ainvoke 完成后自动续接
+    pending_user_messages: list = field(default_factory=list)
 
 
 class SessionManager:
@@ -78,6 +85,7 @@ class SessionManager:
             emitter=emitter,
             companies=companies,
             parallel=parallel,
+            user_info=user_info,
         )
         self.sessions[session_id] = info
 
@@ -95,14 +103,22 @@ class SessionManager:
         parallel: bool,
         emitter: AgentEventEmitter,
     ) -> None:
-        """后台运行 Agent 的协程。"""
+        """后台运行 Agent 的协程。
+
+        支持续接：ainvoke 完成后检查 pending_user_messages，
+        若有则自动续接执行（递归调用自身），传入更新后的 message_history。
+        """
         info = self.sessions.get(session_id)
         if info is None:
             return
         info.status = "running"
         try:
             results = await run_job_application(
-                user_info, companies, parallel=parallel, emitter=emitter
+                user_info,
+                companies,
+                parallel=parallel,
+                emitter=emitter,
+                message_history=info.message_history,
             )
             info.results = results if isinstance(results, dict) else {}
             # 判定整体状态
@@ -111,10 +127,43 @@ class SessionManager:
                 info.error = "; ".join(info.results.get("errors", []))
             else:
                 info.status = "completed"
+                # 从结果中提取消息列表，更新 message_history（仅保留 Human/AI 消息）
+                for company_result in info.results.values():
+                    if isinstance(company_result, dict) and company_result.get("messages"):
+                        info.message_history = [
+                            m
+                            for m in company_result["messages"]
+                            if getattr(m, "type", "") in ("human", "ai")
+                        ]
+                        break
+                # 重新追加运行期间到达的 pending 用户消息（避免被结果覆盖丢失）
+                if info.pending_user_messages:
+                    info.message_history.extend(info.pending_user_messages)
+                # 推送最后一条 AI 消息内容
+                final_content = ""
+                for msg in reversed(info.message_history):
+                    if getattr(msg, "type", "") == "ai":
+                        final_content = getattr(msg, "content", "")
+                        break
+                if final_content:
+                    if not isinstance(final_content, str):
+                        final_content = str(final_content)
+                    await self.push_event(
+                        session_id,
+                        {"type": "agent_message", "content": final_content},
+                    )
             # 推送完成事件
             await self.push_event(
                 session_id, {"type": "session_complete", "results": info.results}
             )
+            # 检查 pending 用户消息，有则自动续接
+            if info.pending_user_messages:
+                # pending 消息已追加到 message_history，清空队列后递归续接
+                info.pending_user_messages.clear()
+                info.status = "running"
+                await self._run_agent(
+                    session_id, user_info, companies, parallel, emitter
+                )
         except asyncio.CancelledError:
             info.status = "disconnected"
             raise
@@ -124,6 +173,62 @@ class SessionManager:
             await self.push_event(
                 session_id, {"type": "error", "message": f"Agent 运行出错: {e}"}
             )
+
+    # ------------------------------------------------------------------
+    # 续接 / 中断重试
+    # ------------------------------------------------------------------
+
+    def send_message(self, session_id: str, user_message: str) -> dict:
+        """用户在 Agent 运行任意阶段发送文本消息干预。
+
+        - 运行中：消息加入 pending 队列，当前 ainvoke 完成后自动续接
+        - 已完成/出错/断开：重启 Agent 任务续接
+
+        Returns:
+            {"status": "queued"} / {"status": "restarted"} / {"error": "..."}
+        """
+        info = self.sessions.get(session_id)
+        if info is None:
+            return {"error": "session not found"}
+        # 用户消息追加到 message_history
+        info.message_history.append(HumanMessage(content=user_message))
+        if info.status == "running":
+            # 运行中：排队等待当前 ainvoke 完成后续接
+            info.pending_user_messages.append(HumanMessage(content=user_message))
+            return {"status": "queued"}
+        # 已完成/出错/断开：重启 Agent 续接
+        info.status = "running"
+        info.task = asyncio.create_task(
+            self._run_agent(
+                session_id, info.user_info, info.companies, info.parallel, info.emitter
+            )
+        )
+        return {"status": "restarted"}
+
+    def interrupt_and_restart(self, session_id: str, user_message: str) -> dict:
+        """中断当前 Agent 运行并以新的用户消息重启。
+
+        Returns:
+            {"status": "restarted"} / {"error": "..."}
+        """
+        info = self.sessions.get(session_id)
+        if info is None:
+            return {"error": "session not found"}
+        # 中断当前任务
+        if info.task is not None and not info.task.done():
+            info.task.cancel()
+        # 清空 pending 队列（中断后以新消息重新开始，旧排队消息不再续接）
+        info.pending_user_messages.clear()
+        # 用户消息追加到 message_history
+        info.message_history.append(HumanMessage(content=user_message))
+        # 重启 Agent
+        info.status = "running"
+        info.task = asyncio.create_task(
+            self._run_agent(
+                session_id, info.user_info, info.companies, info.parallel, info.emitter
+            )
+        )
+        return {"status": "restarted"}
 
     # ------------------------------------------------------------------
     # WebSocket 绑定与事件推送

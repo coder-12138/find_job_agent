@@ -130,6 +130,19 @@ class WebEventEmitter(AgentEventEmitter):
             selected = []
         return selected if isinstance(selected, list) else []
 
+    async def request_user_login(self, request_id: str, login_url: str, message: str) -> str:
+        event = {
+            "type": "request",
+            "request_id": request_id,
+            "request_type": "user_login",
+            "login_url": login_url,
+            "message": message,
+        }
+        result = await self._request(event, request_id, "logged_in")
+        if isinstance(result, dict):
+            return result.get("status", "logged_in")
+        return str(result) if result else "logged_in"
+
     # ------------------------------------------------------------------
     # 内部：注册 future、推送请求、等待响应
     # ------------------------------------------------------------------

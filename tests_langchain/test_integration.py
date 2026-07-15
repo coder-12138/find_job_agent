@@ -85,6 +85,8 @@ class TestModuleWiring:
             "/api/settings/notifications",
             "/api/memory",
             "/api/sessions/{session_id}/confirm",
+            "/api/sessions/{session_id}/message",
+            "/api/sessions/{session_id}/interrupt",
             "/api/health",
             "/api/recruitment-types",
             "/api/uploads",
@@ -103,10 +105,10 @@ class TestModuleWiring:
         assert issubclass(WebEventEmitter, AgentEventEmitter)
 
     def test_run_job_application_signature(self):
-        """run_job_application 应可调用且接受 (user_info, companies, parallel, emitter) 参数。"""
+        """run_job_application 应可调用且接受 (user_info, companies, parallel, emitter, message_history) 参数。"""
         assert callable(run_job_application)
         params = list(inspect.signature(run_job_application).parameters.keys())
-        assert params == ["user_info", "companies", "parallel", "emitter"]
+        assert params == ["user_info", "companies", "parallel", "emitter", "message_history"]
 
     def test_run_company_agent_callable(self):
         """run_company_agent 应可调用。"""

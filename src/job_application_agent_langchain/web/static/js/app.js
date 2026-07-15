@@ -43,6 +43,9 @@ const state = {
         results: null,
         status: null,
     },
+    chat: {
+        messages: [], // {role: "user"|"agent", content: string, time: string}
+    },
 };
 
 let companyUidCounter = 0;
@@ -737,6 +740,21 @@ function handleWsMessage(msg) {
             addLog("error", msg.message || "未知错误");
             toast(msg.message || "错误", "error", "Agent 错误");
             break;
+        case "agent_message":
+            state.chat.messages.push({
+                role: "agent",
+                content: msg.content || "",
+                time: nowTimeStr(),
+            });
+            renderChatMessages();
+            addLog("info", `[对话] Agent：${msg.content || ""}`);
+            break;
+        case "message_status":
+            // 显示消息状态（queued/restarted 等）
+            if (msg.status) {
+                addLog("info", `[对话] 消息状态：${msg.status}${msg.message ? " - " + msg.message : ""}`);
+            }
+            break;
         default:
             console.debug("未处理的消息类型", msg);
     }
@@ -838,6 +856,10 @@ function initMonitor() {
     $("#resultPre").textContent = "";
     $("#logPanel").innerHTML = '<div class="log-empty">等待日志…</div>';
 
+    // 重置对话区域
+    state.chat.messages = [];
+    renderChatMessages();
+
     // 会话元信息
     const meta = $("#sessionMeta");
     meta.textContent = `会话 ID：${state.session.id}`;
@@ -858,6 +880,11 @@ function updateSessionStatus(status) {
     };
     const m = map[status] || map.pending;
     $("#sessionStatus").innerHTML = `<span class="status-badge ${m.cls}">${m.text}</span>`;
+    // 中断按钮：仅运行中显示
+    const interruptBtn = $("#interruptBtn");
+    if (interruptBtn) {
+        interruptBtn.style.display = status === "running" ? "inline-flex" : "none";
+    }
 }
 
 function renderTimeline() {
@@ -935,6 +962,86 @@ function addLog(level, message) {
     while (panel.children.length > 500) panel.removeChild(panel.firstChild);
 }
 
+/* ---------------- 对话区域 ---------------- */
+function renderChatMessages() {
+    const container = $("#chatMessages");
+    if (!container) return;
+    container.innerHTML = "";
+    if (!state.chat.messages.length) {
+        container.innerHTML = '<div class="chat-empty">暂无对话，可在下方输入消息指导 Agent</div>';
+        return;
+    }
+    state.chat.messages.forEach((m) => {
+        const isUser = m.role === "user";
+        const node = el("div", { class: isUser ? "chat-msg-user" : "chat-msg-agent" }, [
+            el("div", { class: "chat-msg-content", text: m.content }),
+            m.time ? el("div", { class: "chat-msg-time", text: m.time }) : null,
+        ]);
+        container.appendChild(node);
+    });
+    // 滚动到底部
+    container.scrollTop = container.scrollHeight;
+}
+
+function sendChatMessage(text) {
+    text = (text || "").trim();
+    if (!text) return;
+    if (!state.session.id) {
+        toast("请先启动投递任务", "warning", "无法发送");
+        return;
+    }
+    const ws = state.session.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "user_message", message: text }));
+    } else {
+        // WebSocket 未连接，回退到 REST
+        api(`/api/sessions/${state.session.id}/message`, {
+            method: "POST",
+            json: { message: text },
+        }).catch((e) => {
+            toast(e.message, "error", "发送失败");
+            addLog("error", `消息发送失败：${e.message}`);
+        });
+    }
+    state.chat.messages.push({
+        role: "user",
+        content: text,
+        time: nowTimeStr(),
+    });
+    renderChatMessages();
+    addLog("info", `[对话] 用户：${text}`);
+    const input = $("#chatInput");
+    if (input) input.value = "";
+}
+
+function interruptAgent(text) {
+    text = (text || "").trim();
+    if (!state.session.id) {
+        toast("请先启动投递任务", "warning", "无法中断");
+        return;
+    }
+    const ws = state.session.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "interrupt", message: text }));
+    } else {
+        // WebSocket 未连接，回退到 REST
+        api(`/api/sessions/${state.session.id}/interrupt`, {
+            method: "POST",
+            json: { message: text },
+        }).catch((e) => {
+            toast(e.message, "error", "中断失败");
+            addLog("error", `中断请求失败：${e.message}`);
+        });
+    }
+    state.chat.messages.push({
+        role: "user",
+        content: `[中断并重试] ${text}`,
+        time: nowTimeStr(),
+    });
+    renderChatMessages();
+    addLog("warning", `[对话] 用户中断并重试：${text}`);
+}
+
 /* ---------------- HITL 请求处理 ---------------- */
 function handleRequest(msg) {
     const reqType = msg.request_type;
@@ -958,6 +1065,9 @@ function handleRequest(msg) {
             break;
         case "position_selection":
             showPositionSelection(msg);
+            break;
+        case "user_login":
+            showLoginRequestPanel(msg);
             break;
         default:
             console.warn("未知请求类型", reqType, msg);
@@ -1233,6 +1343,72 @@ function showPositionSelection(msg) {
     openModal("选择投递岗位", body, footer);
 }
 
+/* —— user_login —— */
+function showLoginRequestPanel(msg) {
+    const loginUrl = msg.login_url || "";
+    const message = msg.message || "";
+
+    const body = el("div", {}, [
+        el("div", {
+            class: "confirm-msg",
+            style: "white-space: pre-wrap;",
+            text: message,
+        }),
+        el("div", { class: "login-url-row" }, [
+            el("label", { class: "field-label", text: "登录页地址" }),
+            el("div", { class: "login-url-box" }, [
+                el("input", {
+                    class: "input login-url-input",
+                    type: "text",
+                    value: loginUrl,
+                    readonly: "true",
+                }),
+                el("button", {
+                    class: "btn btn-soft btn-sm",
+                    text: "复制",
+                    onclick: () => {
+                        const inp = body.querySelector(".login-url-input");
+                        if (!inp) return;
+                        inp.select();
+                        try {
+                            navigator.clipboard.writeText(inp.value);
+                            toast("已复制登录页地址", "success");
+                        } catch (e) {
+                            try { document.execCommand("copy"); toast("已复制登录页地址", "success"); }
+                            catch { toast("复制失败，请手动选择复制", "warning"); }
+                        }
+                    },
+                }),
+                loginUrl ? el("a", {
+                    class: "btn btn-ghost btn-sm",
+                    href: loginUrl,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    text: "在新窗口打开",
+                }) : null,
+            ]),
+        ]),
+        el("p", {
+            style: "margin: 12px 0 0; font-size: 12px; color: var(--gray-500);",
+            text: "请在弹出的浏览器窗口中完成登录/注册，完成后点击下方「已完成登录」按钮。",
+        }),
+    ]);
+
+    const footer = el("div", {}, [
+        el("button", {
+            class: "btn btn-ghost",
+            text: "重新检测",
+            onclick: () => respond(msg.request_id, "user_login", { status: "retry" }),
+        }),
+        el("button", {
+            class: "btn btn-primary",
+            text: "已完成登录",
+            onclick: () => respond(msg.request_id, "user_login", { status: "logged_in" }),
+        }),
+    ]);
+    openModal("🔐 需要登录", body, footer);
+}
+
 /* ---------------- 健康检查 ---------------- */
 async function checkHealth() {
     try {
@@ -1286,6 +1462,24 @@ function init() {
     $("#clearScreenshotsBtn").addEventListener("click", () => {
         $("#screenshotGrid").innerHTML = "";
         $("#screenshotCard").style.display = "none";
+    });
+
+    // 对话区域
+    $("#chatSendBtn").addEventListener("click", () => {
+        sendChatMessage($("#chatInput").value);
+    });
+    $("#chatInput").addEventListener("keydown", (e) => {
+        // 回车发送，Shift+回车换行
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage(e.target.value);
+        }
+    });
+    $("#interruptBtn").addEventListener("click", () => {
+        const text = prompt("请输入新的指令，Agent 将中断当前流程并按新指令重试：");
+        if (text !== null) {
+            interruptAgent(text.trim());
+        }
     });
 
     // 记忆

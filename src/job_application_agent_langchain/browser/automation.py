@@ -11,7 +11,7 @@ class BrowserAutomation:
     _instance = None
     _lock = asyncio.Lock()
 
-    def __init__(self, headless: bool = True, timeout: int = 30000):
+    def __init__(self, headless: bool = False, timeout: int = 30000):
         self.headless = headless
         self.timeout = timeout
         self._playwright = None
@@ -20,7 +20,7 @@ class BrowserAutomation:
         self._page: Page | None = None
 
     @classmethod
-    async def get_shared(cls, headless: bool = True, timeout: int = 30000) -> "BrowserAutomation":
+    async def get_shared(cls, headless: bool = False, timeout: int = 30000) -> "BrowserAutomation":
         if cls._instance is None:
             cls._instance = cls(headless=headless, timeout=timeout)
             await cls._instance.start()
@@ -344,6 +344,154 @@ class BrowserAutomation:
         except Exception as e:
             print(f"[浏览器] 查找链接失败: {e}")
         return links
+
+    async def click_element_by_text(self, text: str) -> dict:
+        """查找并点击文本包含指定内容的可点击元素（button/a/[role=button]/input[type=button]）。
+        取第一个可见元素进行点击。
+        """
+        try:
+            locator = self.page.locator(
+                f'button:has-text("{text}"), a:has-text("{text}"), '
+                f'[role="button"]:has-text("{text}"), '
+                f'input[type="button"][value*="{text}"]'
+            )
+            count = await locator.count()
+            if count == 0:
+                return {"success": False, "error": f"未找到文本包含 '{text}' 的可点击元素"}
+
+            clicked = False
+            for i in range(count):
+                el = locator.nth(i)
+                if await el.is_visible():
+                    await el.click()
+                    clicked = True
+                    break
+
+            if not clicked:
+                return {"success": False, "error": f"未找到可见的文本包含 '{text}' 的可点击元素"}
+
+            await self.page.wait_for_load_state("domcontentloaded")
+            await asyncio.sleep(2)
+
+            new_url = await self.get_current_url()
+            try:
+                page_text = await self.get_page_text()
+                page_text_summary = page_text[:500]
+            except Exception:
+                page_text_summary = ""
+
+            return {
+                "success": True,
+                "new_url": new_url,
+                "page_text_summary": page_text_summary,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def get_visible_buttons(self) -> list[dict]:
+        """获取页面所有可见可点击元素列表（button/a[href]/[role=button]/input[type=button]/input[type=submit]）。
+        最多返回 30 个。
+        """
+        buttons: list[dict] = []
+        try:
+            locator = self.page.locator(
+                "button, a[href], [role='button'], input[type='button'], input[type='submit']"
+            )
+            elements = await locator.all()
+            for el in elements:
+                if len(buttons) >= 30:
+                    break
+                try:
+                    if not await el.is_visible():
+                        continue
+                    tag = await el.evaluate("el => el.tagName.toLowerCase()")
+                    text = ""
+                    if tag == "input":
+                        text = await el.get_attribute("value") or ""
+                    else:
+                        try:
+                            text = await el.inner_text()
+                        except Exception:
+                            text = await el.get_attribute("value") or await el.get_attribute("aria-label") or ""
+                    text = (text or "").strip()
+                    if not text:
+                        continue
+                    href = await el.get_attribute("href") or ""
+                    role = await el.get_attribute("role") or ""
+                    buttons.append({
+                        "text": text,
+                        "tag": tag,
+                        "href": href,
+                        "role": role,
+                    })
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"[浏览器] 获取可见按钮失败: {e}")
+        return buttons
+
+    async def check_login_status(self) -> dict:
+        """检测当前页面的登录状态。
+        判断依据：登录/注册按钮、URL 关键词、用户头像/用户名等登录态元素。
+        """
+        indicators: list[str] = []
+        logged_in = True
+
+        try:
+            page_text = await self.get_page_text()
+        except Exception:
+            page_text = ""
+
+        try:
+            current_url = await self.get_current_url()
+        except Exception:
+            current_url = ""
+
+        # 1. 检查 URL 是否为登录/注册页面
+        url_lower = current_url.lower()
+        if any(kw in url_lower for kw in ["login", "signin", "register", "signup"]):
+            indicators.append(f"URL含登录页标识: {current_url}")
+            logged_in = False
+
+        # 2. 检查页面是否含登录/注册按钮（未登录标识）
+        login_button_keywords = ["登录", "注册", "login", "sign in", "sign in", "log in"]
+        has_login_button = any(kw in page_text.lower() for kw in [k.lower() for k in login_button_keywords])
+        if has_login_button:
+            indicators.append("页面含登录/注册按钮文本")
+
+        # 3. 检查是否存在用户头像/用户名等登录态元素
+        logged_in_selectors = [
+            ".avatar",
+            ".user-name",
+            "[class*='user-info']",
+            "[class*='avatar']",
+            "[class*='username']",
+        ]
+        has_user_element = False
+        for sel in logged_in_selectors:
+            try:
+                if await self.is_element_visible(sel):
+                    has_user_element = True
+                    indicators.append(f"存在登录态元素: {sel}")
+                    break
+            except Exception:
+                continue
+
+        # 综合判断：有登录按钮且无登录态元素 => 未登录
+        if has_login_button and not has_user_element:
+            logged_in = False
+
+        if not indicators:
+            if logged_in:
+                indicators.append("未检测到登录页/登录按钮，默认视为已登录")
+            else:
+                indicators.append("检测到登录页或登录按钮")
+
+        return {
+            "logged_in": logged_in,
+            "indicators": indicators,
+            "current_url": current_url,
+        }
 
     async def get_form_fields(self) -> list[dict[str, Any]]:
         fields = []

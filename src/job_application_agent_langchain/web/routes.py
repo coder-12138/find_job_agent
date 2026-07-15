@@ -13,6 +13,7 @@ from job_application_agent_langchain.web.schemas import (
     ConfirmRequest,
     FileUploadResponse,
     MemoryResponse,
+    MessageRequest,
     NotificationSettings,
     SessionCreateRequest,
     SessionResponse,
@@ -89,6 +90,28 @@ async def confirm_request(session_id: str, req: ConfirmRequest) -> dict:
     if not ok:
         raise HTTPException(status_code=404, detail="未找到对应的请求或请求已处理")
     return {"ok": True, "request_id": req.request_id}
+
+
+@router.post("/sessions/{session_id}/message")
+async def send_message(session_id: str, req: MessageRequest) -> dict:
+    """用户在 Agent 运行任意阶段发送文本消息干预。
+
+    运行中发送的消息排队，ainvoke 完成后自动续接；
+    已完成/出错时发送的消息会重启 Agent 任务。
+    """
+    info = session_manager.get_session(session_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return session_manager.send_message(session_id, req.message)
+
+
+@router.post("/sessions/{session_id}/interrupt")
+async def interrupt_session(session_id: str, req: MessageRequest) -> dict:
+    """中断当前 Agent 运行并以新的用户消息重启。"""
+    info = session_manager.get_session(session_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return session_manager.interrupt_and_restart(session_id, req.message)
 
 
 # ----------------------------------------------------------------------

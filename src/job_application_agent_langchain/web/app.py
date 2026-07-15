@@ -74,6 +74,16 @@ async def websocket_endpoint(ws: WebSocket, session_id: str) -> None:
                             "message": f"未找到请求 {request_id} 或请求已处理",
                         }
                     )
+            elif msg.get("type") == "user_message":
+                # 用户在 Agent 运行任意阶段发送文本消息干预
+                text = msg.get("message", "")
+                result = session_manager.send_message(session_id, text)
+                await ws.send_json({"type": "message_status", "result": result})
+            elif msg.get("type") == "interrupt":
+                # 中断当前 Agent 运行并以新消息重启
+                text = msg.get("message", "")
+                result = session_manager.interrupt_and_restart(session_id, text)
+                await ws.send_json({"type": "message_status", "result": result})
             else:
                 await ws.send_json(
                     {

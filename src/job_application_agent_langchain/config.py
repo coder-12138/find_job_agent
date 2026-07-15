@@ -54,7 +54,7 @@ class Settings:
         if not self.resume_file_path:
             self.resume_file_path = self._find_resume_pdf(resume_dir)
 
-        self.browser_headless = os.getenv("BROWSER_HEADLESS", "true").lower() == "true"
+        self.browser_headless = os.getenv("BROWSER_HEADLESS", "false").lower() == "true"
         self.browser_timeout = int(os.getenv("BROWSER_TIMEOUT", "30000"))
 
         self.has_desktop = self._detect_desktop()

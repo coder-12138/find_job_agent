@@ -304,6 +304,21 @@
                             </div>
                         </div>
 
+                        <!-- 对话区域 -->
+                        <section class="chat-section">
+                            <div class="chat-header">
+                                <h3>对话</h3>
+                                <button class="btn btn-warning btn-sm" id="interruptBtn" style="display:none;">中断并重试</button>
+                            </div>
+                            <div class="chat-messages" id="chatMessages">
+                                <!-- 消息动态渲染 -->
+                            </div>
+                            <div class="chat-input-area">
+                                <textarea id="chatInput" placeholder="输入消息指导 Agent..." rows="2"></textarea>
+                                <button class="btn btn-primary" id="chatSendBtn">发送</button>
+                            </div>
+                        </section>
+
                         <!-- 截图展示 -->
                         <div class="card" id="screenshotCard" style="display:none;">
                             <div class="card-header">

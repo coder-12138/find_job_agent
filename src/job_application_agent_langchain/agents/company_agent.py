@@ -352,6 +352,37 @@ async def report_form_filled() -> str:
     return "已标记表单填写完成"
 
 
+@tool
+async def request_user_login(login_url: str) -> str:
+    """请求用户在浏览器窗口中完成登录/注册。
+
+    在用户确认岗位后、开始填表前调用此工具。Agent 应先导航到登录页，
+    然后调用此工具暂停等待用户在浏览器窗口中自行完成登录（支持扫码、
+    短信验证码、账号密码等），用户在 Web UI 点击"已完成登录"后返回。
+
+    Args:
+        login_url: 当前登录页 URL
+
+    Returns:
+        "logged_in" 表示用户已完成登录
+    """
+    emitter = _emitter_ctx.get()
+    if not emitter:
+        return "logged_in"  # 无 emitter 时直接继续
+
+    request_id = generate_request_id()
+    company = _company_ctx.get()
+    company_name = company.company_name if company else ""
+    message = (
+        f"请在弹出的浏览器窗口中完成「{company_name}」的登录或注册。\n"
+        f"登录页: {login_url}\n"
+        f"支持扫码、短信验证码、账号密码等任意登录方式。\n"
+        f"完成后请点击下方'已完成登录'按钮。"
+    )
+    result = await emitter.request_user_login(request_id, login_url, message)
+    return result
+
+
 # ============================================================================
 # 系统提示构建
 # ============================================================================
@@ -396,6 +427,10 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 1. 调用 emit_progress（phase="search"）通知用户开始搜索
 2. 调用 search_company_website 搜索{company.company_name}的{company.recruitment_type}官网
 3. 调用 navigate_and_find_positions 导航到官网并查找相关岗位
+   注意：部分公司官网（如小鹏汽车）登录后初始页面没有职位列表，需要点击“即刻投递”等入口按钮。
+   navigate_and_find_positions 会自动尝试点击常见入口按钮。若返回信息显示“未找到常见入口按钮”，
+   请调用 get_visible_buttons_tool 查看页面所有可点击元素，再调用 click_element_by_text_tool 
+   点击合适的入口按钮（如“即刻投递”/“开始找工作”/“查看职位”等）。
 4. 调用 find_max_positions 查找该公司可投递的最大岗位数
 5. 对有潜力的岗位调用 get_position_details 获取详情
 6. 根据用户信息（专业、经历、技能）推荐 2n 个岗位（n 为可投递最大数，若未知则推荐 3-5 个）
@@ -413,25 +448,35 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 14. 调用 request_resume_review 请用户审核润色后的简历
 15. 记录用户确认的简历内容，用于后续填表
 
+### 阶段 3.5: 用户登录/注册
+15.5. 调用 emit_progress（phase="login"）通知用户需要登录
+15.6. 导航到该公司的登录页面（通常点击页面上的“登录”按钮即可跳转）
+15.7. 调用 request_user_login(login_url) 请求用户在浏览器窗口中完成登录
+      - 系统以非 headless 模式启动浏览器，用户可在弹出的浏览器窗口中自行操作
+      - 支持扫码、短信验证码、账号密码等任意登录方式
+      - 用户可能需要先注册，同样在该浏览器窗口中完成
+15.8. 用户确认后，调用 check_login_status_tool 验证登录状态
+15.9. 若未登录，提示用户重新登录；若已登录，继续后续填表流程
+
 ### 阶段 4: 填写表单
-16. 调用 emit_progress（phase="fill"）通知用户开始填表
-17. 调用 get_current_page_form 获取当前页面表单字段
-18. 如有简历上传需求，调用 upload_resume 上传简历（使用文件路径）
-19. 对每个必填字段：
+17. 调用 emit_progress（phase="fill"）通知用户开始填表
+18. 调用 get_current_page_form 获取当前页面表单字段
+19. 如有简历上传需求，调用 upload_resume 上传简历（使用文件路径）
+20. 对每个必填字段：
     - 调用 check_field_in_memory 检查记忆中是否有值
     - 如果返回 FIELD_FOUND，使用该值调用 fill_form_field 填写
     - 如果返回 FIELD_MISSING，跳过该字段继续填写下一个（不要阻塞等待用户）
-20. 所有可填字段填写完成后，调用 request_missing_fields 批量请求用户补充缺失字段
-21. 用用户补充的值调用 fill_form_field 填写之前缺失的字段
+21. 所有可填字段填写完成后，调用 request_missing_fields 批量请求用户补充缺失字段
+22. 用用户补充的值调用 fill_form_field 填写之前缺失的字段
 
 ### 阶段 5: 投递确认与提交
-22. 调用 take_screenshot_for_review 截图供用户检查
-23. 调用 emit_screenshot 推送截图给用户
-24. 调用 report_form_filled 标记表单已填写完成
-25. 调用 emit_progress（phase="confirm"）通知用户等待确认
-26. 调用 request_delivery_confirmation 请求用户确认是否投递
-27. 如果返回 "confirmed"，调用 emit_progress（phase="submit"）后调用 submit_application 执行投递
-28. 如果返回 "cancelled"，结束流程（状态: user_skipped）
+23. 调用 take_screenshot_for_review 截图供用户检查
+24. 调用 emit_screenshot 推送截图给用户
+25. 调用 report_form_filled 标记表单已填写完成
+26. 调用 emit_progress（phase="confirm"）通知用户等待确认
+27. 调用 request_delivery_confirmation 请求用户确认是否投递
+28. 如果返回 "confirmed"，调用 emit_progress（phase="submit"）后调用 submit_application 执行投递
+29. 如果返回 "cancelled"，结束流程（状态: user_skipped）
 
 ## 重要规则：
 - 遇到非阻塞通知时使用 notify_user（need_confirmation=False）
@@ -441,6 +486,8 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 - 不要张冠李戴，确保字段值与字段含义匹配
 - 每完成一个阶段，调用 emit_progress 推送进度
 - 如果任何步骤出错，使用 emit_progress 通知用户并尝试继续或结束
+- 用户可能在运行中通过 Web UI 发送指导消息，请遵循用户指令调整行为
+- 浏览器以非 headless 模式启动，用户可直接在浏览器窗口中操作（登录、扫码等）
 """
 
 
@@ -473,6 +520,7 @@ def get_company_agent_tools() -> list:
         request_missing_fields,
         request_delivery_confirmation,
         report_form_filled,
+        request_user_login,
     ]
 
     # 按名称去重（保留首次出现的工具）
@@ -496,6 +544,7 @@ async def run_company_agent(
     memory: AgentMemory,
     emitter: AgentEventEmitter,
     file_paths: dict[str, str] | None = None,
+    message_history: list | None = None,
 ) -> dict[str, Any]:
     """运行单个公司的完整投递流程。
 
@@ -505,9 +554,11 @@ async def run_company_agent(
         memory: Agent 记忆
         emitter: 事件发射器（用于人机交互）
         file_paths: 文件路径映射 {"resume": "...", "degree_cert": "...", "transcript": "..."}
+        message_history: 可选的历史消息列表（LangChain message 对象），
+            用于续接/中断重试场景。若提供，会与本次的用户消息一起传入 agent。
 
     Returns:
-        结果 dict: {status, form_filled, submitted, recommended_positions, error}
+        结果 dict: {status, form_filled, submitted, recommended_positions, error, messages}
     """
     # 设置上下文变量
     _emitter_ctx.set(emitter)
@@ -547,10 +598,14 @@ async def run_company_agent(
             f"请按照工作流程依次执行搜索、推荐、润色、填表、投递。"
         )
 
+        # 构建 messages 列表：续接时包含历史消息
+        messages = []
+        if message_history:
+            messages.extend(message_history)
+        messages.append(HumanMessage(content=user_message))
+
         # 调用 Agent
-        result = await agent.ainvoke({
-            "messages": [HumanMessage(content=user_message)],
-        })
+        result = await agent.ainvoke({"messages": messages})
 
         # 从上下文中提取结果
         recommended = _recommended_positions_ctx.get() or []
@@ -587,6 +642,7 @@ async def run_company_agent(
             "error": "",
             "agent_type": agent_type,
             "final_message": final_message[:500] if final_message else "",
+            "messages": result.get("messages", []) if result else [],
         }
 
     except Exception as e:
@@ -598,4 +654,5 @@ async def run_company_agent(
             "submitted": _submitted_ctx.get(),
             "recommended_positions": _recommended_positions_ctx.get() or [],
             "error": str(e),
+            "messages": [],
         }

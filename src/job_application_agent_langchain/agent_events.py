@@ -41,6 +41,20 @@ class AgentEventEmitter(ABC):
     async def request_position_selection(self, request_id: str, positions: list[dict]) -> list:
         """请求用户选择岗位。返回选中的岗位列表（含志愿顺序）"""
 
+    @abstractmethod
+    async def request_user_login(self, request_id: str, login_url: str, message: str) -> str:
+        """请求用户在浏览器窗口中完成登录/注册。
+
+        Args:
+            request_id: 请求 ID
+            login_url: 当前登录页 URL
+            message: 提示消息
+
+        Returns:
+            "logged_in" 表示用户已完成登录，"retry" 表示需要重新登录
+        """
+        ...
+
 
 class CLIEmitter(AgentEventEmitter):
     """终端实现，用于无 Web UI 时的命令行运行。用 print/input 完成交互。"""
@@ -190,6 +204,16 @@ class CLIEmitter(AgentEventEmitter):
         if selected:
             print(f"  ✅ 已选择 {len(selected)} 个岗位")
         return selected
+
+    async def request_user_login(self, request_id: str, login_url: str, message: str) -> str:
+        print(f"\n{'='*50}")
+        print(f"🔐 需要登录")
+        print(f"登录页: {login_url}")
+        print(f"提示: {message}")
+        print(f"请在浏览器窗口中完成登录，完成后按回车...")
+        print(f"{'='*50}")
+        input()  # 等待用户按回车
+        return "logged_in"
 
     @staticmethod
     def _print_dict(data: dict, indent: int = 0):

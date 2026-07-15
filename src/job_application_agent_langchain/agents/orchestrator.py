@@ -20,6 +20,7 @@ async def run_job_application(
     companies: list[CompanyState],
     parallel: bool = False,
     emitter: AgentEventEmitter | None = None,
+    message_history: list | None = None,
 ) -> dict[str, Any]:
     """运行简历投递流程。
 
@@ -31,6 +32,7 @@ async def run_job_application(
         companies: 待投递公司列表
         parallel: 是否并行处理多家公司
         emitter: 事件发射器，None 时使用 CLIEmitter（终端交互）
+        message_history: 可选的历史消息列表，透传给公司子 Agent 用于续接/中断重试。
 
     Returns:
         各公司的投递结果 dict: {company_name: {status, form_filled, submitted, ...}}
@@ -59,7 +61,10 @@ async def run_job_application(
     if parallel and len(companies) > 1:
         # 并行模式：为每家公司创建独立的公司子 Agent
         tasks = [
-            run_company_agent(user_info, company, memory, emitter, file_paths)
+            run_company_agent(
+                user_info, company, memory, emitter, file_paths,
+                message_history=message_history,
+            )
             for company in companies
         ]
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
@@ -76,7 +81,10 @@ async def run_job_application(
     else:
         # 顺序模式：逐个处理公司
         for company in companies:
-            result = await run_company_agent(user_info, company, memory, emitter, file_paths)
+            result = await run_company_agent(
+                user_info, company, memory, emitter, file_paths,
+                message_history=message_history,
+            )
             results[company.company_name] = result
 
     # 保存记忆

@@ -67,3 +67,9 @@ class FileUploadResponse(BaseModel):
     file_type: str
     saved_path: str
     size: int
+
+
+class MessageRequest(BaseModel):
+    """用户干预消息请求（续接/中断重试）。"""
+
+    message: str
