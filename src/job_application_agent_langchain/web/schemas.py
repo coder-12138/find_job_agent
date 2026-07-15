@@ -43,6 +43,14 @@ class NotificationSettings(BaseModel):
     smtp_recipient_email: str = ""
 
 
+class ApiSettings(BaseModel):
+    """Agent API 配置（API 地址、密钥、模型名称）。"""
+
+    api_base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model_name: str = "gpt-4o"
+
+
 class MemoryResponse(BaseModel):
     """记忆内容响应。"""
 

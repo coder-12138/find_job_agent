@@ -295,6 +295,7 @@ svg { display: block; }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-2-1 { grid-template-columns: 2fr 1fr; }
 .monitor-grid { grid-template-columns: 1.4fr 1fr; }
+.grid > .full { grid-column: 1 / -1; }
 
 /* ============== 按钮 ============== */
 .btn {

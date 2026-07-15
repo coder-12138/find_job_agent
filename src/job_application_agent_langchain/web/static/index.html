@@ -41,7 +41,7 @@
                     <span class="nav-icon">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     </span>
-                    <span class="nav-label">通知设置</span>
+                    <span class="nav-label">系统设置</span>
                 </a>
                 <a href="#" class="nav-item" data-view="monitor">
                     <span class="nav-icon">
@@ -187,6 +187,39 @@
 
                 <!-- ============== 视图 3：通知设置 ============== -->
                 <section class="view" id="view-settings">
+                    <!-- API 配置卡片 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Agent API 配置</h2>
+                            <p class="card-desc">配置 Agent 使用的 LLM 接口地址、密钥和模型名称。保存后立即生效，无需重启。</p>
+                        </div>
+                        <div class="card-body">
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label class="field-label" for="apiBaseUrl">API 接口地址</label>
+                                    <input type="text" class="input" id="apiBaseUrl" placeholder="https://api.openai.com/v1">
+                                </div>
+                                <div class="form-group">
+                                    <label class="field-label" for="apiModel">模型名称</label>
+                                    <input type="text" class="input" id="apiModel" placeholder="gpt-4o">
+                                </div>
+                                <div class="form-group full">
+                                    <label class="field-label" for="apiKey">API 密钥</label>
+                                    <input type="password" class="input" id="apiKey" placeholder="sk-...">
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button class="btn btn-primary" id="saveApiSettingsBtn">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                    保存 API 配置
+                                </button>
+                                <button class="btn btn-ghost" id="resetApiSettingsBtn">重新加载</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 邮件通知设置卡片 -->
                     <div class="card">
                         <div class="card-header">
                             <h2 class="card-title">邮件通知设置</h2>

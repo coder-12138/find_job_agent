@@ -159,7 +159,7 @@ async function api(path, options = {}) {
 const VIEW_TITLES = {
     home: "投递任务",
     files: "文件管理",
-    settings: "通知设置",
+    settings: "系统设置",
     monitor: "运行监控",
     memory: "记忆管理",
 };
@@ -173,7 +173,7 @@ function switchView(view) {
     $("#sidebar").classList.remove("open");
     // 视图打开时按需加载数据
     if (view === "files") loadUploads();
-    if (view === "settings") loadSettings();
+    if (view === "settings") { loadSettings(); loadApiSettings(); }
     if (view === "memory") loadMemory();
 }
 
@@ -529,6 +529,35 @@ async function loadUploads() {
 const FILE_ICON_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
 /* ---------------- 通知设置 ---------------- */
+async function loadApiSettings() {
+    try {
+        const s = await api("/api/settings/api");
+        $("#apiBaseUrl").value = s.api_base_url || "";
+        $("#apiKey").value = s.api_key || "";
+        $("#apiModel").value = s.model_name || "";
+    } catch (e) {
+        toast(e.message, "error", "加载 API 配置失败");
+    }
+}
+
+async function saveApiSettings() {
+    const payload = {
+        api_base_url: $("#apiBaseUrl").value.trim(),
+        api_key: $("#apiKey").value.trim(),
+        model_name: $("#apiModel").value.trim(),
+    };
+    const btn = $("#saveApiSettingsBtn");
+    btn.disabled = true;
+    try {
+        await api("/api/settings/api", { method: "PUT", json: payload });
+        toast("API 配置已保存", "success");
+    } catch (e) {
+        toast(e.message, "error", "保存失败");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 async function loadSettings() {
     try {
         const s = await api("/api/settings/notifications");
@@ -1454,6 +1483,9 @@ function init() {
     // 通知设置
     $("#saveSettingsBtn").addEventListener("click", saveSettings);
     $("#resetSettingsBtn").addEventListener("click", loadSettings);
+    // API 配置
+    $("#saveApiSettingsBtn").addEventListener("click", saveApiSettings);
+    $("#resetApiSettingsBtn").addEventListener("click", loadApiSettings);
 
     // 监控
     $("#clearLogBtn").addEventListener("click", () => {

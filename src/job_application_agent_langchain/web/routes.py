@@ -10,6 +10,7 @@ from job_application_agent_langchain.context import CompanyState, RECRUITMENT_TY
 from job_application_agent_langchain.user_info.parser import load_user_info
 from job_application_agent_langchain.web.file_storage import list_uploads, save_upload_file
 from job_application_agent_langchain.web.schemas import (
+    ApiSettings,
     ConfirmRequest,
     FileUploadResponse,
     MemoryResponse,
@@ -19,7 +20,12 @@ from job_application_agent_langchain.web.schemas import (
     SessionResponse,
 )
 from job_application_agent_langchain.web.session_manager import session_manager
-from job_application_agent_langchain.web.settings_store import load_settings, save_settings
+from job_application_agent_langchain.web.settings_store import (
+    load_api_settings,
+    load_settings,
+    save_api_settings,
+    save_settings,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -151,6 +157,23 @@ async def update_notification_settings(
     settings: NotificationSettings,
 ) -> NotificationSettings:
     ok = save_settings(settings)
+    if not ok:
+        raise HTTPException(status_code=500, detail="保存设置失败")
+    return settings
+
+
+# ----------------------------------------------------------------------
+# API 配置
+# ----------------------------------------------------------------------
+
+@router.get("/settings/api", response_model=ApiSettings)
+async def get_api_settings() -> ApiSettings:
+    return load_api_settings()
+
+
+@router.put("/settings/api", response_model=ApiSettings)
+async def update_api_settings(settings: ApiSettings) -> ApiSettings:
+    ok = save_api_settings(settings)
     if not ok:
         raise HTTPException(status_code=500, detail="保存设置失败")
     return settings
