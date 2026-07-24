@@ -14,7 +14,10 @@ from fastapi import WebSocket
 from langchain_core.messages import HumanMessage
 
 from job_application_agent_langchain.agent_events import AgentEventEmitter
-from job_application_agent_langchain.agents.orchestrator import run_job_application
+from job_application_agent_langchain.agents.orchestrator import (
+    run_from_document,
+    run_job_application,
+)
 from job_application_agent_langchain.context import CompanyState
 from job_application_agent_langchain.memory import AgentMemory
 from job_application_agent_langchain.user_info.parser import UserInfo
@@ -44,6 +47,12 @@ class SessionInfo:
     parallel: bool = False
     # 续接/中断重试所需的用户信息（重启 Agent 时复用）
     user_info: UserInfo | None = None
+    # 文档投递相关参数（仅文档投递会话使用）
+    doc_url: str = ""
+    job_keyword: str = ""
+    industry: str = ""
+    city: str = ""
+    recruitment_type: str = "校招"
     # 对话历史消息列表（LangChain message 对象：HumanMessage / AIMessage）
     message_history: list = field(default_factory=list)
     # Agent 运行期间收到的用户消息队列，当前 ainvoke 完成后自动续接
@@ -164,6 +173,137 @@ class SessionManager:
                 await self._run_agent(
                     session_id, user_info, companies, parallel, emitter
                 )
+        except asyncio.CancelledError:
+            info.status = "disconnected"
+            raise
+        except Exception as e:
+            info.status = "error"
+            info.error = str(e)
+            await self.push_event(
+                session_id, {"type": "error", "message": f"Agent 运行出错: {e}"}
+            )
+
+    def create_document_session(
+        self,
+        doc_url: str,
+        job_keyword: str,
+        industry: str,
+        city: str,
+        recruitment_type: str,
+        parallel: bool,
+        user_info: UserInfo,
+    ) -> str:
+        """创建文档投递会话并启动后台 Agent 任务。返回 session_id。
+
+        与 create_session 不同：不预先传入公司列表，而是由 run_from_document
+        在运行时从腾讯文档动态发现匹配公司。companies 传空列表占位。
+
+        Args:
+            doc_url: 腾讯文档链接
+            job_keyword: 岗位关键词
+            industry: 行业关键词
+            city: 城市关键词
+            recruitment_type: 投递类型（校招/社招/日常实习/暑期实习（转正实习））
+            parallel: 是否并行处理
+            user_info: 用户信息
+
+        Returns:
+            session_id
+        """
+        session_id = str(uuid.uuid4())[:12]
+        emitter = WebEventEmitter(session_id, self)
+        info = SessionInfo(
+            session_id=session_id,
+            emitter=emitter,
+            companies=[],  # 由 run_from_document 动态发现
+            parallel=parallel,
+            user_info=user_info,
+            doc_url=doc_url,
+            job_keyword=job_keyword,
+            industry=industry,
+            city=city,
+            recruitment_type=recruitment_type,
+        )
+        self.sessions[session_id] = info
+
+        # 启动后台文档投递 Agent 任务（需在运行中的事件循环里调用）
+        info.task = asyncio.create_task(
+            self._run_document_agent(
+                session_id, doc_url, job_keyword, industry, city,
+                recruitment_type, parallel, user_info, emitter,
+            )
+        )
+        return session_id
+
+    async def _run_document_agent(
+        self,
+        session_id: str,
+        doc_url: str,
+        job_keyword: str,
+        industry: str,
+        city: str,
+        recruitment_type: str,
+        parallel: bool,
+        user_info: UserInfo,
+        emitter: AgentEventEmitter,
+    ) -> None:
+        """后台运行文档投递 Agent 的协程。
+
+        调用 run_from_document 从腾讯文档读取公司列表并执行投递，
+        结果处理（状态判定、session_complete 推送、异常处理）与 _run_agent 类似。
+        注意：run_from_document 不支持 message_history 续接，故无自动续接逻辑。
+        """
+        info = self.sessions.get(session_id)
+        if info is None:
+            return
+        info.status = "running"
+        try:
+            results = await run_from_document(
+                doc_url,
+                user_info,
+                job_keyword=job_keyword,
+                industry=industry,
+                city=city,
+                recruitment_type=recruitment_type,
+                parallel=parallel,
+                emitter=emitter,
+            )
+            info.results = results if isinstance(results, dict) else {}
+            # 判定整体状态
+            if info.results.get("status") == "error":
+                info.status = "error"
+                err = info.results.get("error") or "; ".join(
+                    info.results.get("errors", [])
+                )
+                info.error = err
+            else:
+                info.status = "completed"
+                # 从结果中提取消息列表，更新 message_history（仅保留 Human/AI 消息）
+                for company_result in info.results.values():
+                    if isinstance(company_result, dict) and company_result.get("messages"):
+                        info.message_history = [
+                            m
+                            for m in company_result["messages"]
+                            if getattr(m, "type", "") in ("human", "ai")
+                        ]
+                        break
+                # 推送最后一条 AI 消息内容
+                final_content = ""
+                for msg in reversed(info.message_history):
+                    if getattr(msg, "type", "") == "ai":
+                        final_content = getattr(msg, "content", "")
+                        break
+                if final_content:
+                    if not isinstance(final_content, str):
+                        final_content = str(final_content)
+                    await self.push_event(
+                        session_id,
+                        {"type": "agent_message", "content": final_content},
+                    )
+            # 推送完成事件
+            await self.push_event(
+                session_id, {"type": "session_complete", "results": info.results}
+            )
         except asyncio.CancelledError:
             info.status = "disconnected"
             raise

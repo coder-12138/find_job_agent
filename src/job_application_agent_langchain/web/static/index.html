@@ -31,6 +31,12 @@
                     </span>
                     <span class="nav-label">投递任务</span>
                 </a>
+                <a href="#" class="nav-item" data-view="document">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+                    </span>
+                    <span class="nav-label">文档投递</span>
+                </a>
                 <a href="#" class="nav-item" data-view="files">
                     <span class="nav-icon">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
@@ -129,6 +135,92 @@
                             <div class="card-body">
                                 <div id="userInfoSummary" class="info-grid">
                                     <div class="info-skel">加载中…</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============== 视图：文档投递 ============== -->
+                <section class="view" id="view-document">
+                    <div class="grid grid-2-1">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">文档投递</h2>
+                                <p class="card-desc">粘贴腾讯文档智能表格链接，输入岗位/行业/城市，自动发现匹配公司并投递。</p>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-group full">
+                                    <label class="field-label" for="docUrl">腾讯文档链接 *</label>
+                                    <input type="text" class="input" id="docUrl" placeholder="https://docs.qq.com/smartsheet/...">
+                                </div>
+                                <div class="grid grid-2">
+                                    <div class="form-group">
+                                        <label class="field-label" for="docJobKeyword">岗位关键词</label>
+                                        <input type="text" class="input" id="docJobKeyword" placeholder="如：后端开发、AI算法">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="field-label" for="docIndustry">行业</label>
+                                        <input type="text" class="input" id="docIndustry" placeholder="如：互联网、金融">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="field-label" for="docCity">城市</label>
+                                        <input type="text" class="input" id="docCity" placeholder="如：北京、上海">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="field-label" for="docRecruitmentType">投递类型</label>
+                                        <select class="select" id="docRecruitmentType">
+                                            <option value="校招">校招</option>
+                                            <option value="社招">社招</option>
+                                            <option value="日常实习">日常实习</option>
+                                            <option value="暑期实习（转正实习）">暑期实习（转正实习）</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="form-row toggle-row">
+                                    <div class="toggle-meta">
+                                        <div class="toggle-title">并行投递</div>
+                                        <div class="toggle-desc">同时处理多家公司，速度更快，但更消耗资源</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="docParallelMode">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+
+                                <div class="form-actions">
+                                    <button class="btn btn-primary btn-lg" id="startDocBtn">
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                        开始投递
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">使用说明</h2>
+                                <p class="card-desc">文档投递会从腾讯文档智能表格中读取公司列表并自动匹配。</p>
+                            </div>
+                            <div class="card-body">
+                                <div id="docTips" class="info-grid">
+                                    <div class="info-item">
+                                        <div class="k">1. 准备文档</div>
+                                        <div class="v">在腾讯文档智能表格中维护公司清单，包含公司名称、岗位、城市、投递链接等字段。</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="k">2. 粘贴链接</div>
+                                        <div class="v">将智能表格的分享链接粘贴到左侧输入框，确保文档已公开可访问。</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="k">3. 填写筛选</div>
+                                        <div class="v">输入岗位/行业/城市关键词，Agent 会据此筛选匹配的公司。</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="k">4. 确认投递</div>
+                                        <div class="v">匹配后 Agent 会让你确认要投递哪些公司，随后自动执行投递流程。</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

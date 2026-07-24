@@ -417,6 +417,8 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 - 岗位关键词: {company.job_keywords}
 - 期望工作城市: {','.join(company.preferred_cities) if company.preferred_cities else '不限'}
 - 内推码: {company.referral_code or '无'}
+- 投递链接: {company.application_url or '无（需搜索官网）'}
+- 来源: {'文档自动发现' if company.source == 'document' else '手动输入'}
 
 ## 文件路径：
 {file_paths_text}{memory_hint}
@@ -425,6 +427,7 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 
 ### 阶段 1: 搜索官网与岗位推荐
 1. 调用 emit_progress（phase="search"）通知用户开始搜索
+   注意：如果待投递公司信息中已提供「投递链接」（application_url 不为空），则跳过步骤 2 的 search_company_website，直接用 navigate_and_find_positions 导航到该链接。若链接是微信公众号推文（mp.weixin.qq.com），暂时提示无法处理并跳过该公司。
 2. 调用 search_company_website 搜索{company.company_name}的{company.recruitment_type}官网
 3. 调用 navigate_and_find_positions 导航到官网并查找相关岗位
    注意：部分公司官网（如小鹏汽车）登录后初始页面没有职位列表，需要点击“即刻投递”等入口按钮。

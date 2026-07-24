@@ -158,6 +158,7 @@ async function api(path, options = {}) {
 /* ---------------- 导航 ---------------- */
 const VIEW_TITLES = {
     home: "投递任务",
+    document: "文档投递",
     files: "文件管理",
     settings: "系统设置",
     monitor: "运行监控",
@@ -418,6 +419,61 @@ async function startSession() {
             };
         });
         toast(`会话已创建：${res.session_id}`, "success", "开始投递");
+        switchView("monitor");
+        initMonitor();
+        connectWebSocket(res.session_id);
+    } catch (e) {
+        toast(e.message, "error", "创建会话失败");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> 开始投递';
+    }
+}
+
+/* ---------------- 文档投递视图 ---------------- */
+async function startDocumentSession() {
+    // 收集表单数据
+    const docUrl = $("#docUrl").value.trim();
+    const jobKeyword = $("#docJobKeyword").value.trim();
+    const industry = $("#docIndustry").value.trim();
+    const city = $("#docCity").value.trim();
+    const recruitmentType = $("#docRecruitmentType").value;
+    const parallel = $("#docParallelMode").checked;
+
+    // 表单验证：doc_url 必填且含 docs.qq.com
+    if (!docUrl) {
+        toast("请填写腾讯文档链接", "warning", "无法开始");
+        return;
+    }
+    if (docUrl.indexOf("docs.qq.com") === -1) {
+        toast("请提供有效的腾讯文档链接（需包含 docs.qq.com）", "warning", "链接无效");
+        return;
+    }
+
+    const btn = $("#startDocBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spin"><circle cx="12" cy="12" r="10" stroke-dasharray="40 20"/></svg> 启动中…';
+
+    try {
+        const res = await api("/api/sessions/document", {
+            method: "POST",
+            json: {
+                doc_url: docUrl,
+                job_keyword: jobKeyword,
+                industry,
+                city,
+                recruitment_type: recruitmentType,
+                parallel,
+            },
+        });
+        state.session.id = res.session_id;
+        state.session.companies = {};
+        state.session.phase = null;
+        state.session.completedPhases = new Set();
+        state.session.results = null;
+        state.session.status = res.status;
+        toast(`会话已创建：${res.session_id}`, "success", "开始投递");
+        // 跳转到运行监控视图并连接 WebSocket（复用现有逻辑）
         switchView("monitor");
         initMonitor();
         connectWebSocket(res.session_id);
@@ -1475,6 +1531,9 @@ function init() {
         reindexCompanies();
     });
     $("#startBtn").addEventListener("click", startSession);
+
+    // 文档投递
+    $("#startDocBtn").addEventListener("click", startDocumentSession);
 
     // 文件管理
     setupDropzone();

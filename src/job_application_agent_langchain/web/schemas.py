@@ -23,6 +23,17 @@ class SessionCreateRequest(BaseModel):
     parallel: bool = False
 
 
+class DocumentSessionRequest(BaseModel):
+    """文档投递会话请求。"""
+
+    doc_url: str
+    job_keyword: str = ""
+    industry: str = ""
+    city: str = ""
+    recruitment_type: str = "校招"
+    parallel: bool = False
+
+
 class SessionResponse(BaseModel):
     """创建会话后的响应。"""
 

@@ -29,6 +29,10 @@ class CompanyState:
     form_filled: bool = False
     submitted: bool = False
     error_message: str = ""
+    # 预填的投递链接（来自文档表格）
+    application_url: str = ""
+    # 来源标记：manual=手动输入，document=文档自动发现
+    source: str = "manual"
 
 
 @dataclass

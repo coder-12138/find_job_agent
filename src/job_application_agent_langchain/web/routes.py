@@ -12,6 +12,7 @@ from job_application_agent_langchain.web.file_storage import list_uploads, save_
 from job_application_agent_langchain.web.schemas import (
     ApiSettings,
     ConfirmRequest,
+    DocumentSessionRequest,
     FileUploadResponse,
     MemoryResponse,
     MessageRequest,
@@ -69,6 +70,28 @@ async def create_session(req: SessionCreateRequest) -> SessionResponse:
     ]
 
     session_id = session_manager.create_session(companies, req.parallel, user_info)
+    info = session_manager.get_session(session_id)
+    return SessionResponse(
+        session_id=session_id,
+        status=info.status if info else "pending",
+        created_at=info.created_at if info else "",
+    )
+
+
+@router.post("/sessions/document", response_model=SessionResponse)
+async def create_document_session_endpoint(req: DocumentSessionRequest) -> SessionResponse:
+    """从腾讯文档创建投递会话。"""
+    if not req.doc_url or "docs.qq.com" not in req.doc_url:
+        raise HTTPException(status_code=400, detail="请提供有效的腾讯文档链接")
+    settings = Settings()
+    errors = settings.validate()
+    if errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+    user_info = _load_user_info()
+    session_id = session_manager.create_document_session(
+        req.doc_url, req.job_keyword, req.industry, req.city,
+        req.recruitment_type, req.parallel, user_info,
+    )
     info = session_manager.get_session(session_id)
     return SessionResponse(
         session_id=session_id,
