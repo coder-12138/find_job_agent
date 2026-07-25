@@ -1,0 +1,3571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简历自动投递 Agent — Demo</title>
+    <style>
+/* ============================================================
+   简历自动投递 Agent — Web UI 样式
+   纯原生 CSS，无外部依赖
+   ============================================================ */
+
+/* ---------- 设计令牌 ---------- */
+:root {
+    /* 主色：蓝紫 indigo */
+    --primary-50: #eef2ff;
+    --primary-100: #e0e7ff;
+    --primary-200: #c7d2fe;
+    --primary-300: #a5b4fc;
+    --primary-400: #818cf8;
+    --primary-500: #6366f1;
+    --primary-600: #4f46e5;
+    --primary-700: #4338ca;
+    --primary-800: #3730a3;
+    --primary-900: #312e81;
+
+    /* 语义色 */
+    --success-50: #ecfdf5;
+    --success-100: #d1fae5;
+    --success-500: #10b981;
+    --success-600: #059669;
+    --success-700: #047857;
+
+    --warning-50: #fffbeb;
+    --warning-100: #fef3c7;
+    --warning-500: #f59e0b;
+    --warning-600: #d97706;
+    --warning-700: #b45309;
+
+    --error-50: #fef2f2;
+    --error-100: #fee2e2;
+    --error-500: #ef4444;
+    --error-600: #dc2626;
+    --error-700: #b91c1c;
+
+    --info-50: #eff6ff;
+    --info-100: #dbeafe;
+    --info-500: #3b82f6;
+    --info-600: #2563eb;
+
+    /* 中性色 */
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+
+    /* 布局 */
+    --sidebar-w: 240px;
+    --topbar-h: 60px;
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+
+    --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow: 0 4px 10px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 10px 25px -5px rgba(15, 23, 42, 0.10), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
+    --shadow-lg: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+        "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", "Consolas", "Liberation Mono", monospace;
+
+    --transition: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---------- 重置 ---------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--gray-800);
+    background: var(--gray-50);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; font-size: inherit; }
+svg { display: block; }
+
+/* ---------- 应用框架 ---------- */
+.app-shell {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* ============== 侧边栏 ============== */
+.sidebar {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    background: linear-gradient(180deg, #1e1b4b 0%, #312e81 100%);
+    color: #c7d2fe;
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    z-index: 40;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 20px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.brand-logo {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--primary-400), var(--primary-600));
+    border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+.brand-title { font-size: 16px; font-weight: 600; color: #fff; }
+.brand-sub { font-size: 11px; color: var(--primary-300); letter-spacing: 0.04em; }
+
+.nav {
+    flex: 1;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+}
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    color: #c7d2fe;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all var(--transition);
+    position: relative;
+}
+.nav-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+.nav-item.active {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.nav-item.active::before {
+    content: "";
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 20px;
+    background: #fff;
+    border-radius: 0 3px 3px 0;
+}
+.nav-icon { display: inline-flex; opacity: 0.9; }
+.nav-badge {
+    margin-left: auto;
+    min-width: 18px; height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--error-500);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+}
+
+.sidebar-footer {
+    padding: 14px 18px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 12px;
+    color: #e0e7ff;
+}
+.status-pill .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--gray-400);
+}
+.status-pill.connected .dot {
+    background: var(--success-500);
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+}
+.status-pill.connecting .dot {
+    background: var(--warning-500);
+    animation: pulse 1.2s ease-in-out infinite;
+}
+.status-pill.error .dot { background: var(--error-500); }
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* ============== 主区域 ============== */
+.main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+.topbar {
+    height: var(--topbar-h);
+    background: #fff;
+    border-bottom: 1px solid var(--gray-200);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 24px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+}
+.page-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--gray-900);
+    flex: 1;
+}
+.topbar-actions { display: flex; gap: 8px; }
+
+.content {
+    padding: 24px;
+    flex: 1;
+    max-width: 1280px;
+    width: 100%;
+    margin: 0 auto;
+}
+
+/* ============== 视图切换 ============== */
+.view { display: none; animation: fadeIn 200ms ease; }
+.view.active { display: block; }
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============== 卡片 ============== */
+.card {
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+.card-header {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+.card-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--gray-900);
+}
+.card-desc {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--gray-500);
+    line-height: 1.5;
+}
+.card-body { padding: 20px; }
+
+.grid { display: grid; gap: 20px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-2-1 { grid-template-columns: 2fr 1fr; }
+.monitor-grid { grid-template-columns: 1.4fr 1fr; }
+.grid > .full { grid-column: 1 / -1; }
+
+/* ============== 按钮 ============== */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    background: var(--gray-100);
+    color: var(--gray-700);
+    font-size: 13px;
+    font-weight: 500;
+    transition: all var(--transition);
+    white-space: nowrap;
+    line-height: 1.4;
+}
+.btn:hover { background: var(--gray-200); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-lg { padding: 11px 20px; font-size: 14px; }
+.btn-block { width: 100%; }
+
+.btn-primary {
+    background: var(--primary-600);
+    color: #fff;
+    box-shadow: 0 1px 2px rgba(79, 70, 229, 0.3);
+}
+.btn-primary:hover {
+    background: var(--primary-700);
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+}
+.btn-soft {
+    background: var(--primary-50);
+    color: var(--primary-700);
+    border-color: var(--primary-100);
+}
+.btn-soft:hover {
+    background: var(--primary-100);
+    color: var(--primary-800);
+}
+.btn-ghost {
+    background: transparent;
+    color: var(--gray-600);
+    border-color: var(--gray-200);
+}
+.btn-ghost:hover { background: var(--gray-50); color: var(--gray-800); }
+
+.btn-success { background: var(--success-600); color: #fff; }
+.btn-success:hover { background: var(--success-700); }
+.btn-danger { background: var(--error-600); color: #fff; }
+.btn-danger:hover { background: var(--error-700); }
+.btn-outline-danger {
+    background: #fff;
+    color: var(--error-600);
+    border-color: var(--error-100);
+}
+.btn-outline-danger:hover { background: var(--error-50); }
+
+.icon-btn {
+    width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: var(--radius);
+    color: var(--gray-600);
+    transition: all var(--transition);
+}
+.icon-btn:hover { background: var(--gray-100); color: var(--gray-800); }
+
+/* ============== 表单元素 ============== */
+.form-group { margin-bottom: 14px; }
+.field-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 6px;
+}
+.input, .select, textarea.input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--gray-800);
+    font-size: 13px;
+    transition: all var(--transition);
+    outline: none;
+}
+.input:focus, .select:focus, textarea.input:focus {
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.input::placeholder { color: var(--gray-400); }
+.select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+}
+textarea.input { resize: vertical; min-height: 80px; }
+
+.form-row { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--gray-100);
+}
+
+/* 开关 */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+    position: absolute;
+    inset: 0;
+    background: var(--gray-300);
+    border-radius: 22px;
+    transition: background var(--transition);
+}
+.slider::before {
+    content: "";
+    position: absolute;
+    width: 16px; height: 16px;
+    left: 3px; top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform var(--transition);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.switch input:checked + .slider { background: var(--primary-600); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+
+.toggle-row {
+    padding: 14px 16px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+}
+.toggle-row.inline { background: transparent; border: none; padding: 0; }
+.toggle-meta { flex: 1; }
+.toggle-title { font-size: 13px; font-weight: 600; color: var(--gray-800); }
+.toggle-desc { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+
+/* ============== 投递任务：公司行 ============== */
+.company-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+.company-row {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 14px;
+    background: #fff;
+    transition: border-color var(--transition);
+}
+.company-row:hover { border-color: var(--primary-300); }
+.company-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+.company-row-index {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-700);
+}
+.company-row-index .num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--primary-100);
+    color: var(--primary-700);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px;
+}
+.company-row .btn-remove {
+    color: var(--gray-400);
+    padding: 4px;
+}
+.company-row .btn-remove:hover { color: var(--error-500); }
+.company-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+.company-fields .full { grid-column: 1 / -1; }
+.field-mini-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-600);
+    margin-bottom: 4px;
+    display: block;
+}
+
+/* 用户信息摘要 */
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 16px;
+}
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--gray-100);
+}
+.info-item .k {
+    font-size: 11px;
+    color: var(--gray-500);
+    font-weight: 500;
+}
+.info-item .v {
+    font-size: 13px;
+    color: var(--gray-800);
+    word-break: break-word;
+}
+.info-skel {
+    grid-column: 1 / -1;
+    color: var(--gray-400);
+    font-size: 13px;
+    padding: 20px 0;
+    text-align: center;
+}
+
+/* ============== 文件管理 ============== */
+.upload-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.upload-controls .select { max-width: 240px; }
+
+.dropzone {
+    border: 2px dashed var(--gray-300);
+    border-radius: var(--radius-lg);
+    padding: 36px 20px;
+    text-align: center;
+    color: var(--gray-500);
+    transition: all var(--transition);
+    cursor: pointer;
+    background: var(--gray-50);
+    outline: none;
+}
+.dropzone:hover, .dropzone:focus {
+    border-color: var(--primary-400);
+    background: var(--primary-50);
+    color: var(--primary-700);
+}
+.dropzone.dragover {
+    border-color: var(--primary-500);
+    background: var(--primary-100);
+    color: var(--primary-700);
+    transform: scale(1.01);
+}
+.dropzone-inner { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.dropzone-text { font-size: 14px; font-weight: 500; }
+.dropzone-text .link { color: var(--primary-600); text-decoration: underline; }
+.dropzone-hint { font-size: 12px; color: var(--gray-400); }
+
+.upload-progress-wrap { margin-top: 14px; }
+.progress-bar {
+    height: 6px;
+    background: var(--gray-200);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-500), var(--primary-600));
+    border-radius: 3px;
+    transition: width 200ms ease;
+    width: 0%;
+}
+.progress-text { font-size: 12px; color: var(--gray-600); margin-top: 6px; }
+
+.file-list { display: flex; flex-direction: column; gap: 8px; }
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    transition: background var(--transition);
+}
+.file-item:hover { background: var(--gray-50); }
+.file-icon {
+    width: 36px; height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--primary-50);
+    color: var(--primary-600);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.file-meta { flex: 1; min-width: 0; }
+.file-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-800);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.file-sub {
+    font-size: 11px;
+    color: var(--gray-500);
+    margin-top: 2px;
+}
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.badge-resume { background: var(--primary-50); color: var(--primary-700); }
+.badge-degree_cert { background: var(--success-50); color: var(--success-700); }
+.badge-transcript { background: var(--warning-50); color: var(--warning-700); }
+.badge-other { background: var(--gray-100); color: var(--gray-700); }
+
+.empty-state {
+    text-align: center;
+    color: var(--gray-400);
+    font-size: 13px;
+    padding: 28px 12px;
+}
+
+/* ============== 阶段时间线 ============== */
+.timeline {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+.phase {
+    flex: 1;
+    min-width: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    position: relative;
+}
+.phase-node {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--gray-100);
+    color: var(--gray-400);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    border: 2px solid var(--gray-200);
+    transition: all var(--transition);
+    z-index: 2;
+    position: relative;
+}
+.phase-label {
+    font-size: 12px;
+    color: var(--gray-500);
+    margin-top: 8px;
+    font-weight: 500;
+}
+.phase::before {
+    content: "";
+    position: absolute;
+    top: 14px;
+    left: -50%;
+    width: 100%;
+    height: 2px;
+    background: var(--gray-200);
+    z-index: 1;
+}
+.phase:first-child::before { display: none; }
+.phase.done .phase-node {
+    background: var(--success-500);
+    border-color: var(--success-500);
+    color: #fff;
+}
+.phase.done::before { background: var(--success-500); }
+.phase.done .phase-label { color: var(--success-700); }
+.phase.current .phase-node {
+    background: var(--primary-600);
+    border-color: var(--primary-600);
+    color: #fff;
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.18);
+    animation: pulseRing 1.8s ease-in-out infinite;
+}
+.phase.current .phase-label { color: var(--primary-700); font-weight: 600; }
+@keyframes pulseRing {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.18); }
+    50% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.10); }
+}
+
+.phase-label-map {
+    display: none;
+}
+
+/* ============== 状态徽章 ============== */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.status-badge::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.status-pending { background: var(--gray-100); color: var(--gray-600); }
+.status-running { background: var(--primary-50); color: var(--primary-700); }
+.status-running::before { animation: pulse 1.2s ease-in-out infinite; }
+.status-completed { background: var(--success-50); color: var(--success-700); }
+.status-error { background: var(--error-50); color: var(--error-700); }
+.status-disconnected { background: var(--warning-50); color: var(--warning-700); }
+
+/* ============== 公司状态卡片 ============== */
+.company-cards { display: flex; flex-direction: column; gap: 12px; }
+.company-card {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 14px;
+    transition: border-color var(--transition);
+}
+.company-card.running { border-color: var(--primary-300); background: var(--primary-50); }
+.company-card.completed { border-color: var(--success-500); }
+.company-card.error { border-color: var(--error-500); background: var(--error-50); }
+
+.company-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+.company-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-900);
+}
+.company-card-meta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--gray-600);
+}
+.meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.meta-chip.ok { color: var(--success-600); font-weight: 600; }
+.meta-chip.no { color: var(--gray-400); }
+
+.company-current-phase {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--primary-700);
+    font-weight: 500;
+}
+.company-error {
+    margin-top: 8px;
+    color: var(--error-700);
+    font-size: 12px;
+}
+
+/* ============== 日志面板 ============== */
+.log-panel {
+    height: 320px;
+    overflow-y: auto;
+    background: var(--gray-900);
+    border-radius: var(--radius);
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+}
+.log-empty { color: var(--gray-500); text-align: center; padding: 40px 0; }
+.log-line {
+    color: var(--gray-300);
+    padding: 2px 0;
+    word-break: break-word;
+    display: flex;
+    gap: 8px;
+}
+.log-time { color: var(--gray-500); flex-shrink: 0; }
+.log-tag {
+    flex-shrink: 0;
+    font-weight: 600;
+    width: 60px;
+}
+.log-msg { flex: 1; }
+.log-line.info .log-tag { color: var(--info-500); }
+.log-line.success .log-tag { color: var(--success-500); }
+.log-line.warning .log-tag { color: var(--warning-500); }
+.log-line.error .log-tag { color: var(--error-500); }
+.log-line.error .log-msg { color: #fca5a5; }
+.log-line.success .log-msg { color: #86efac; }
+.log-line.warning .log-msg { color: #fcd34d; }
+
+/* ============== 截图 ============== */
+.screenshot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+}
+.screenshot-item {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--gray-50);
+}
+.screenshot-thumb {
+    width: 100%;
+    min-height: 160px;
+    background: var(--gray-200);
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gray-400);
+}
+.screenshot-meta {
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--gray-600);
+}
+.screenshot-meta .company { font-weight: 600; color: var(--gray-800); }
+.screenshot-meta .path {
+    color: var(--gray-400);
+    font-family: var(--mono);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 会话结果 */
+.result-pre {
+    background: var(--gray-900);
+    color: var(--gray-200);
+    padding: 14px;
+    border-radius: var(--radius);
+    font-family: var(--mono);
+    font-size: 12px;
+    overflow-x: auto;
+    margin: 0;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* ============== 监控空态 ============== */
+.monitor-empty {
+    text-align: center;
+    padding: 80px 24px;
+    color: var(--gray-500);
+}
+.monitor-empty svg { margin: 0 auto 16px; color: var(--gray-300); }
+.monitor-empty h3 { margin: 0 0 6px; color: var(--gray-700); font-size: 16px; }
+.monitor-empty p { margin: 0 0 20px; font-size: 13px; }
+
+.session-status { display: flex; align-items: center; }
+
+/* ============== 数据表 ============== */
+.table-wrap { overflow-x: auto; }
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.data-table th, .data-table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--gray-100);
+    vertical-align: top;
+}
+.data-table th {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--gray-50);
+}
+.data-table tbody tr:hover { background: var(--gray-50); }
+.data-table .field-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--primary-700);
+    font-weight: 600;
+}
+.data-table .field-value {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--gray-700);
+    word-break: break-all;
+    max-width: 360px;
+}
+.data-table .field-source {
+    font-size: 11px;
+    color: var(--gray-500);
+}
+.data-table .field-time {
+    font-size: 11px;
+    color: var(--gray-500);
+}
+.source-tag {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+.source-learned { background: var(--primary-50); color: var(--primary-700); }
+.source-source { background: var(--gray-100); color: var(--gray-600); }
+
+/* ============== Toast ============== */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+.toast {
+    min-width: 260px;
+    max-width: 360px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    pointer-events: auto;
+    animation: slideIn 240ms ease;
+}
+@keyframes slideIn {
+    from { transform: translateX(20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+.toast.out { animation: slideOut 200ms ease forwards; }
+@keyframes slideOut {
+    to { transform: translateX(20px); opacity: 0; }
+}
+.toast-icon {
+    width: 20px; height: 20px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+}
+.toast-success .toast-icon { background: var(--success-100); color: var(--success-600); }
+.toast-error .toast-icon { background: var(--error-100); color: var(--error-600); }
+.toast-warning .toast-icon { background: var(--warning-100); color: var(--warning-600); }
+.toast-info .toast-icon { background: var(--info-100); color: var(--info-600); }
+.toast-body { flex: 1; font-size: 13px; color: var(--gray-800); }
+.toast-title { font-weight: 600; margin-bottom: 2px; }
+.toast-msg { color: var(--gray-600); font-size: 12px; }
+
+/* ============== 模态框 ============== */
+.modal-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.55);
+    backdrop-filter: blur(2px);
+    z-index: 900;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.modal-mask.open { display: flex; animation: fadeIn 160ms ease; }
+.modal {
+    background: #fff;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 720px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: modalIn 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes modalIn {
+    from { transform: scale(0.96) translateY(8px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+}
+.modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.modal-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--gray-900);
+}
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+.modal-footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--gray-100);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    background: var(--gray-50);
+}
+
+/* HITL: missing_fields */
+.hform-field { margin-bottom: 14px; }
+.hform-field .reason {
+    font-size: 11px;
+    color: var(--warning-700);
+    background: var(--warning-50);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    margin-top: 4px;
+    display: inline-block;
+}
+
+/* HITL: resume_review */
+.resume-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+.resume-col {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 12px;
+    background: var(--gray-50);
+}
+.resume-col h4 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-700);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.resume-col.polished {
+    background: var(--primary-50);
+    border-color: var(--primary-200);
+}
+.resume-col.polished h4 { color: var(--primary-700); }
+.resume-section { margin-bottom: 12px; }
+.resume-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-600);
+    margin-bottom: 4px;
+}
+.resume-section-value {
+    font-size: 12px;
+    color: var(--gray-800);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.resume-section textarea {
+    width: 100%;
+    border: 1px solid var(--primary-200);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: var(--mono);
+    background: #fff;
+    min-height: 60px;
+    resize: vertical;
+    outline: none;
+}
+.resume-section textarea:focus {
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+/* HITL: position_selection */
+.position-list { display: flex; flex-direction: column; gap: 10px; }
+.position-item {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    transition: all var(--transition);
+    cursor: pointer;
+}
+.position-item:hover { border-color: var(--primary-300); background: var(--primary-50); }
+.position-item.selected {
+    border-color: var(--primary-500);
+    background: var(--primary-50);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+.position-order {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--gray-100);
+    color: var(--gray-500);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    border: 1px solid var(--gray-300);
+}
+.position-item.selected .position-order {
+    background: var(--primary-600);
+    color: #fff;
+    border-color: var(--primary-600);
+}
+.position-body { flex: 1; min-width: 0; }
+.position-name { font-size: 14px; font-weight: 600; color: var(--gray-900); }
+.position-meta { font-size: 12px; color: var(--gray-600); margin-top: 2px; }
+.position-reason {
+    font-size: 12px;
+    color: var(--gray-700);
+    margin-top: 6px;
+    padding: 6px 8px;
+    background: var(--gray-50);
+    border-radius: var(--radius-sm);
+}
+.position-jd {
+    font-size: 11px;
+    color: var(--gray-500);
+    margin-top: 6px;
+    max-height: 80px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+.position-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+/* HITL: confirmation */
+.confirm-msg {
+    font-size: 14px;
+    color: var(--gray-700);
+    line-height: 1.6;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--gray-50);
+    border-radius: var(--radius);
+}
+.confirm-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* 通用辅助 */
+.hidden { display: none !important; }
+.mobile-only { display: none; }
+
+/* ============== 响应式 ============== */
+@media (max-width: 1024px) {
+    .grid-2-1 { grid-template-columns: 1fr; }
+    .monitor-grid { grid-template-columns: 1fr; }
+    .resume-compare { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        left: 0; top: 0;
+        transform: translateX(-100%);
+        transition: transform var(--transition);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .mobile-only { display: inline-flex; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .company-fields { grid-template-columns: 1fr; }
+    .content { padding: 16px; }
+    .info-grid { grid-template-columns: 1fr; }
+    .modal { max-width: 100%; }
+    .topbar { padding: 0 16px; }
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+.log-panel::-webkit-scrollbar-thumb { background: var(--gray-700); }
+.log-panel::-webkit-scrollbar-thumb:hover { background: var(--gray-600); }
+
+/* HITL: user_login */
+.login-url-row { margin-top: 4px; }
+.login-url-box {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.login-url-box .login-url-input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--primary-700);
+    background: var(--primary-50);
+}
+.login-url-box .btn {
+    flex-shrink: 0;
+    text-decoration: none;
+}
+
+/* ============== 对话区域 ============== */
+.chat-section {
+    margin-top: 20px;
+    background: #fff;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--gray-200);
+    overflow: hidden;
+}
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--gray-200);
+}
+.chat-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-900);
+}
+.chat-messages {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.chat-empty {
+    text-align: center;
+    color: var(--gray-400);
+    font-size: 13px;
+    padding: 28px 12px;
+}
+.chat-msg-user {
+    align-self: flex-end;
+    background: var(--primary-600);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 12px 12px 4px 12px;
+    max-width: 75%;
+    word-wrap: break-word;
+}
+.chat-msg-agent {
+    align-self: flex-start;
+    background: var(--gray-100);
+    color: var(--gray-800);
+    padding: 8px 12px;
+    border-radius: 12px 12px 12px 4px;
+    max-width: 75%;
+    word-wrap: break-word;
+}
+.chat-msg-content {
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.chat-msg-time {
+    font-size: 10px;
+    opacity: 0.7;
+    margin-top: 4px;
+    text-align: right;
+}
+.chat-input-area {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--gray-200);
+}
+.chat-input-area textarea {
+    flex: 1;
+    resize: vertical;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius);
+    padding: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: all var(--transition);
+}
+.chat-input-area textarea:focus {
+    border-color: var(--primary-500);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.btn-warning {
+    background: var(--warning-500);
+    color: #fff;
+    border: none;
+}
+.btn-warning:hover {
+    background: var(--warning-600);
+}
+
+/* 旋转动画 */
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============== Demo 横幅 ============== */
+.demo-banner {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    background: linear-gradient(90deg, #f59e0b 0%, #d97706 50%, #b45309 100%);
+    color: #fff;
+    text-align: center;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.demo-banner svg { flex-shrink: 0; }
+    </style>
+</head>
+<body>
+    <!-- ============== Demo 横幅 ============== -->
+    <div class="demo-banner">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>Demo 模式 — 演示数据，非真实后端连接</span>
+    </div>
+
+    <div class="app-shell">
+        <!-- ============== 侧边栏 ============== -->
+        <aside class="sidebar" id="sidebar">
+            <div class="brand">
+                <div class="brand-logo">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <div class="brand-title">投递助手</div>
+                    <div class="brand-sub">Job Application Agent</div>
+                </div>
+            </div>
+
+            <nav class="nav">
+                <a href="#" class="nav-item active" data-view="home">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    </span>
+                    <span class="nav-label">投递任务</span>
+                </a>
+                <a href="#" class="nav-item" data-view="files">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+                    </span>
+                    <span class="nav-label">文件管理</span>
+                </a>
+                <a href="#" class="nav-item" data-view="settings">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </span>
+                    <span class="nav-label">系统设置</span>
+                </a>
+                <a href="#" class="nav-item" data-view="monitor">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    </span>
+                    <span class="nav-label">运行监控</span>
+                    <span class="nav-badge" id="monitorBadge" style="display:none;">!</span>
+                </a>
+                <a href="#" class="nav-item" data-view="memory">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/><path d="M16 2a10 10 0 0 1 6 6"/></svg>
+                    </span>
+                    <span class="nav-label">记忆管理</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-pill" id="connPill">
+                    <span class="dot"></span>
+                    <span id="connText">未连接</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ============== 主内容区 ============== -->
+        <main class="main">
+            <!-- 顶栏 -->
+            <header class="topbar">
+                <button class="icon-btn mobile-only" id="menuToggle" aria-label="菜单">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <h1 class="page-title" id="pageTitle">投递任务</h1>
+                <div class="topbar-actions">
+                    <button class="btn btn-ghost" id="healthBtn" title="健康检查">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                        <span>状态</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="content">
+
+                <!-- ============== 视图 1：投递任务 ============== -->
+                <section class="view active" id="view-home">
+                    <div class="grid grid-2-1">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">配置投递公司</h2>
+                                <p class="card-desc">添加一家或多家目标公司，配置招聘类型、内推码、岗位关键词与意向城市。</p>
+                            </div>
+                            <div class="card-body">
+                                <div id="companyList" class="company-list">
+                                    <!-- 公司行由 JS 动态生成 -->
+                                </div>
+                                <button class="btn btn-soft btn-block" id="addCompanyBtn">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    添加公司
+                                </button>
+
+                                <div class="form-row toggle-row">
+                                    <div class="toggle-meta">
+                                        <div class="toggle-title">并行模式</div>
+                                        <div class="toggle-desc">同时处理多家公司，速度更快，但更消耗资源</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="parallelMode">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+
+                                <div class="form-actions">
+                                    <button class="btn btn-primary btn-lg" id="startBtn">
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                        开始投递
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">用户信息摘要</h2>
+                                <p class="card-desc">从用户信息文件解析出的关键字段。完整信息在“记忆管理”中查看。</p>
+                            </div>
+                            <div class="card-body">
+                                <div id="userInfoSummary" class="info-grid">
+                                    <div class="info-skel">加载中…</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============== 视图 2：文件管理 ============== -->
+                <section class="view" id="view-files">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">上传文件</h2>
+                            <p class="card-desc">将简历、学位证、成绩单等文件拖拽到下方区域，或点击选择文件。</p>
+                        </div>
+                        <div class="card-body">
+                            <div class="upload-controls">
+                                <label class="field-label">文件类型</label>
+                                <select id="uploadType" class="select">
+                                    <option value="resume">简历 (resume)</option>
+                                    <option value="degree_cert">学位证 (degree_cert)</option>
+                                    <option value="transcript">成绩单 (transcript)</option>
+                                    <option value="other">其他 (other)</option>
+                                </select>
+                            </div>
+
+                            <div class="dropzone" id="dropzone" tabindex="0">
+                                <div class="dropzone-inner">
+                                    <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                    <div class="dropzone-text">拖拽文件到此处，或<span class="link">点击选择</span></div>
+                                    <div class="dropzone-hint" id="dropzoneHint">支持 PDF、DOCX、图片等任意格式</div>
+                                </div>
+                                <input type="file" id="fileInput" multiple style="display:none;">
+                            </div>
+
+                            <div class="upload-progress-wrap" id="uploadProgress" style="display:none;">
+                                <div class="progress-bar"><div class="progress-fill" id="uploadProgressFill"></div></div>
+                                <div class="progress-text" id="uploadProgressText">上传中…</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">已上传文件</h2>
+                            <button class="btn btn-soft btn-sm" id="refreshFilesBtn">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                刷新
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="file-list" id="fileList">
+                                <div class="empty-state">暂无文件</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============== 视图 3：系统设置 ============== -->
+                <section class="view" id="view-settings">
+                    <!-- API 配置卡片 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Agent API 配置</h2>
+                            <p class="card-desc">配置 Agent 使用的 LLM 接口地址、密钥和模型名称。保存后立即生效，无需重启。</p>
+                        </div>
+                        <div class="card-body">
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label class="field-label" for="apiBaseUrl">API 接口地址</label>
+                                    <input type="text" class="input" id="apiBaseUrl" placeholder="https://api.openai.com/v1">
+                                </div>
+                                <div class="form-group">
+                                    <label class="field-label" for="apiModel">模型名称</label>
+                                    <input type="text" class="input" id="apiModel" placeholder="gpt-4o">
+                                </div>
+                                <div class="form-group full">
+                                    <label class="field-label" for="apiKey">API 密钥</label>
+                                    <input type="password" class="input" id="apiKey" placeholder="sk-...">
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button class="btn btn-primary" id="saveApiSettingsBtn">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                    保存 API 配置
+                                </button>
+                                <button class="btn btn-ghost" id="resetApiSettingsBtn">重新加载</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 邮件通知设置卡片 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">邮件通知设置</h2>
+                            <p class="card-desc">配置 SMTP 邮件服务器，在投递完成或出现错误时自动收到通知。</p>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-row toggle-row">
+                                <div class="toggle-meta">
+                                    <div class="toggle-title">启用邮件通知</div>
+                                    <div class="toggle-desc">关闭后将不会发送任何邮件</div>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="emailEnabled">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label class="field-label" for="smtpServer">SMTP 服务器</label>
+                                    <input type="text" class="input" id="smtpServer" placeholder="smtp.gmail.com">
+                                </div>
+                                <div class="form-group">
+                                    <label class="field-label" for="smtpPort">端口</label>
+                                    <input type="number" class="input" id="smtpPort" placeholder="587">
+                                </div>
+                                <div class="form-group">
+                                    <label class="field-label" for="smtpSenderEmail">发件邮箱</label>
+                                    <input type="email" class="input" id="smtpSenderEmail" placeholder="sender@example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label class="field-label" for="smtpSenderPassword">发件密码 / 授权码</label>
+                                    <input type="password" class="input" id="smtpSenderPassword" placeholder="••••••••">
+                                </div>
+                                <div class="form-group">
+                                    <label class="field-label" for="smtpRecipientEmail">收件邮箱</label>
+                                    <input type="email" class="input" id="smtpRecipientEmail" placeholder="recipient@example.com">
+                                </div>
+                                <div class="form-group toggle-row inline">
+                                    <div class="toggle-meta">
+                                        <div class="toggle-title">使用 TLS</div>
+                                        <div class="toggle-desc">推荐开启</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="smtpUseTls">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button class="btn btn-primary" id="saveSettingsBtn">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                    保存设置
+                                </button>
+                                <button class="btn btn-ghost" id="resetSettingsBtn">重新加载</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============== 视图 4：运行监控 ============== -->
+                <section class="view" id="view-monitor">
+                    <div class="monitor-empty" id="monitorEmpty">
+                        <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        <h3>暂无运行中的会话</h3>
+                        <p>前往「投递任务」配置公司并开始投递，运行状态将在此实时展示。</p>
+                        <button class="btn btn-primary" data-jump="home">前往配置</button>
+                    </div>
+
+                    <div class="monitor-wrap" id="monitorWrap" style="display:none;">
+                        <!-- 会话概览 -->
+                        <div class="card">
+                            <div class="card-header">
+                                <div>
+                                    <h2 class="card-title">会话概览</h2>
+                                    <p class="card-desc" id="sessionMeta">—</p>
+                                </div>
+                                <div class="session-status" id="sessionStatus">
+                                    <span class="status-badge status-pending">等待中</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <!-- 阶段时间线 -->
+                                <div class="timeline" id="phaseTimeline">
+                                    <!-- 由 JS 生成 -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-2-1 monitor-grid">
+                            <!-- 公司状态卡片 -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 class="card-title">公司状态</h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="company-cards" id="companyCards">
+                                        <!-- 由 JS 生成 -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 日志面板 -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 class="card-title">日志</h2>
+                                    <button class="btn btn-ghost btn-sm" id="clearLogBtn">清空</button>
+                                </div>
+                                <div class="card-body">
+                                    <div class="log-panel" id="logPanel">
+                                        <div class="log-empty">等待日志…</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 对话区域 -->
+                        <section class="chat-section">
+                            <div class="chat-header">
+                                <h3>对话</h3>
+                                <button class="btn btn-warning btn-sm" id="interruptBtn" style="display:none;">中断并重试</button>
+                            </div>
+                            <div class="chat-messages" id="chatMessages">
+                                <!-- 消息动态渲染 -->
+                            </div>
+                            <div class="chat-input-area">
+                                <textarea id="chatInput" placeholder="输入消息指导 Agent..." rows="2"></textarea>
+                                <button class="btn btn-primary" id="chatSendBtn">发送</button>
+                            </div>
+                        </section>
+
+                        <!-- 截图展示 -->
+                        <div class="card" id="screenshotCard" style="display:none;">
+                            <div class="card-header">
+                                <h2 class="card-title">截图</h2>
+                                <button class="btn btn-ghost btn-sm" id="clearScreenshotsBtn">清空</button>
+                            </div>
+                            <div class="card-body">
+                                <div class="screenshot-grid" id="screenshotGrid"></div>
+                            </div>
+                        </div>
+
+                        <!-- 会话结果 -->
+                        <div class="card" id="resultCard" style="display:none;">
+                            <div class="card-header">
+                                <h2 class="card-title">会话结果</h2>
+                            </div>
+                            <div class="card-body">
+                                <pre class="result-pre" id="resultPre"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============== 视图 5：记忆管理 ============== -->
+                <section class="view" id="view-memory">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">已记忆的字段</h2>
+                            <p class="card-desc">这些字段是 Agent 在过往交互中学习到的补充信息，下次投递时可直接复用。</p>
+                            <button class="btn btn-soft btn-sm" id="refreshMemoryBtn">刷新</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-wrap">
+                                <table class="data-table" id="memoryTable">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:24%;">字段名</th>
+                                            <th style="width:30%;">值</th>
+                                            <th style="width:16%;">来源</th>
+                                            <th style="width:18%;">更新时间</th>
+                                            <th>原因</th>
+                                            <th style="width:90px;">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="memoryTableBody">
+                                        <tr><td colspan="6" class="empty-state">加载中…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ============== Toast 提示 ============== -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- ============== HITL 模态层 ============== -->
+    <div class="modal-mask" id="modalMask">
+        <div class="modal" id="modal" role="dialog" aria-modal="true">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">请求</h3>
+                <button class="icon-btn" id="modalClose" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
+        </div>
+    </div>
+
+    <script>
+/* ============================================================
+   简历自动投递 Agent — Web UI 前端逻辑（Demo 版，无后端依赖）
+   纯原生 JS，无外部依赖；所有 API/WebSocket 均为模拟
+   ============================================================ */
+
+(function () {
+"use strict";
+
+/* ---------------- 常量 ---------------- */
+const PHASES = [
+    { key: "search", label: "搜索" },
+    { key: "recommend", label: "推荐" },
+    { key: "polish", label: "润色" },
+    { key: "fill", label: "填表" },
+    { key: "confirm", label: "确认" },
+    { key: "submit", label: "投递" },
+];
+const PHASE_INDEX = Object.fromEntries(PHASES.map((p, i) => [p.key, i]));
+
+const RECRUITMENT_TYPES = ["校招", "社招", "日常实习", "暑期实习（转正实习）"];
+
+/* 简历字段中文标签（resume_review） */
+const RESUME_LABELS = {
+    self_introduction: "自我介绍",
+    project_highlights: "项目亮点",
+    skill_highlights: "技能亮点",
+    work_highlights: "工作亮点",
+    summary: "总结",
+};
+
+/* ---------------- 应用状态 ---------------- */
+const state = {
+    currentView: "home",
+    recruitmentTypes: RECRUITMENT_TYPES,
+    companies: [],
+    session: {
+        id: null,
+        ws: null,
+        wsReconnectTimer: null,
+        companies: {},
+        phase: null,
+        completedPhases: new Set(),
+        results: null,
+        status: null,
+        mockPendingRequest: null,
+        mockCompany: null,
+        mockTimeouts: [],
+    },
+    chat: {
+        messages: [],
+    },
+};
+
+let companyUidCounter = 0;
+
+/* ============================================================
+   Mock 数据
+   ============================================================ */
+const MOCK = {
+    recruitmentTypes: ["校招", "社招", "日常实习", "暑期实习（转正实习）"],
+
+    userInfo: {
+        name: "张三",
+        phone: "138****8888",
+        email: "zhangsan@example.com",
+        gender: "男",
+        current_city: "北京",
+        school: "清华大学",
+        major: "计算机科学与技术",
+        degree: "硕士",
+        wechat: "zhangsan_wx",
+    },
+
+    uploads: [
+        { filename: "张三_简历.pdf", file_type: "resume", size: 245760, modified_at: "2026-07-14" },
+        { filename: "学位证.pdf", file_type: "degree_cert", size: 102400, modified_at: "2026-07-10" },
+        { filename: "成绩单.pdf", file_type: "transcript", size: 81920, modified_at: "2026-07-08" },
+    ],
+
+    apiSettings: {
+        api_base_url: "https://api.siliconflow.cn/v1",
+        api_key: "sk-xxxxxxxxxxxxxxxx",
+        model_name: "deepseek-ai/DeepSeek-V3",
+    },
+
+    emailSettings: {
+        email_enabled: false,
+        smtp_server: "smtp.gmail.com",
+        smtp_port: 587,
+        smtp_use_tls: true,
+        smtp_sender_email: "",
+        smtp_sender_password: "",
+        smtp_recipient_email: "",
+    },
+
+    memory: {
+        learned_fields: {
+            github_url: "https://github.com/zhangsan",
+            expected_salary: "25-30k",
+            available_date: "2026-08-01",
+        },
+        source_user_info: {
+            name: "张三",
+            phone: "138****8888",
+            email: "zhangsan@example.com",
+            school: "清华大学",
+            major: "计算机科学与技术",
+            degree: "硕士",
+            gender: "男",
+            current_city: "北京",
+            wechat: "zhangsan_wx",
+        },
+        field_metadata: {
+            github_url: { timestamp: "2026-07-12T10:30:00", reason: "首次投递时用户主动提供" },
+            expected_salary: { timestamp: "2026-07-12T11:00:00", reason: "用户在对话中提及期望薪资" },
+            available_date: { timestamp: "2026-07-13T09:15:00", reason: "用户在对话中说明可入职时间" },
+        },
+    },
+
+    positions: [
+        {
+            name: "后端开发工程师-Java",
+            location: "北京",
+            reason: "与简历技能高度匹配，Java 项目经验丰富",
+            jd: "1. 本科及以上学历，计算机相关专业\n2. 熟悉 Java 编程，了解 Spring 框架\n3. 熟悉 MySQL、Redis 等常用存储\n4. 有分布式系统经验优先\n5. 良好的沟通与团队协作能力",
+        },
+        {
+            name: "后端开发工程师-Go",
+            location: "上海",
+            reason: "有相关项目经验，技术栈契合度高",
+            jd: "1. 本科及以上学历\n2. 熟悉 Go 语言，了解 Gin/Echo 框架\n3. 熟悉微服务架构\n4. 有高并发系统经验优先\n5. 熟悉 K8s/Docker 优先",
+        },
+        {
+            name: "全栈开发工程师",
+            location: "深圳",
+            reason: "技术栈覆盖全面，发展空间大",
+            jd: "1. 本科及以上学历\n2. 熟悉前后端开发（Java/Go + React/Vue）\n3. 熟悉云原生架构\n4. 有从 0 到 1 项目经验优先\n5. 较强的工程化能力",
+        },
+    ],
+
+    resumeOriginal: {
+        self_introduction: "本人是清华大学计算机科学与技术专业硕士在读，热爱编程，有较强的学习能力和团队协作能力。",
+        project_highlights: [
+            { value: "基于 Spring Boot 的电商后台系统，承担订单模块设计与开发" },
+            { value: "分布式消息队列调研与落地，提升系统吞吐量 30%" },
+        ],
+        skill_highlights: ["Java", "Spring", "MySQL", "Redis", "Go"],
+        work_highlights: [
+            { value: "字节跳动 后端实习 (2025.06-2025.09)，参与推荐系统服务开发" },
+        ],
+        summary: "具备扎实的计算机基础和工程能力，熟悉后端开发全流程，希望加入贵司继续深造。",
+    },
+
+    resumePolished: {
+        self_introduction: "清华大学计算机硕士在读，三年后端开发经验，精通 Java/Go 双语言栈，曾主导分布式电商系统订单模块设计，并在字节跳动实习期间参与推荐系统核心服务开发，对高并发、高可用架构有深入理解。",
+        project_highlights: [
+            { value: "【电商后台订单系统】基于 Spring Boot + Spring Cloud 微服务架构，独立完成订单创建、状态机、库存扣减等核心模块，日均订单量 50w+" },
+            { value: "【分布式消息队列】调研 Kafka/RocketMQ 并完成自研轻量级 MQ 落地，支撑系统吞吐量提升 30%，端到端延迟降低 40%" },
+        ],
+        skill_highlights: ["Java(精通)", "Spring Cloud", "MySQL 调优", "Redis", "Go", "Kafka", "Docker", "K8s"],
+        work_highlights: [
+            { value: "字节跳动 后端实习 (2025.06-2025.09)，参与推荐系统召回服务开发，单机 QPS 提升至 8k+，完成服务无侵入式链路追踪改造" },
+        ],
+        summary: "具备扎实的计算机基础、分布式系统经验与工程化能力，熟悉后端开发全流程，希望加入贵司参与核心业务系统建设。",
+    },
+};
+
+/* ============================================================
+   工具函数
+   ============================================================ */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+function el(tag, attrs = {}, children = []) {
+    const node = document.createElement(tag);
+    Object.entries(attrs).forEach(([k, v]) => {
+        if (k === "class") node.className = v;
+        else if (k === "html") node.innerHTML = v;
+        else if (k === "text") node.textContent = v;
+        else if (k.startsWith("on") && typeof v === "function") {
+            node.addEventListener(k.slice(2).toLowerCase(), v);
+        } else if (v !== null && v !== undefined) {
+            node.setAttribute(k, v);
+        }
+    });
+    (Array.isArray(children) ? children : [children]).forEach((c) => {
+        if (c == null) return;
+        if (typeof c === "string" || typeof c === "number") {
+            node.appendChild(document.createTextNode(String(c)));
+        } else {
+            node.appendChild(c);
+        }
+    });
+    return node;
+}
+
+function escapeHtml(s) {
+    if (s == null) return "";
+    return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function formatTime(iso) {
+    if (!iso) return "—";
+    try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return iso;
+        return d.toLocaleString("zh-CN", { hour12: false });
+    } catch { return iso; }
+}
+
+function formatSize(bytes) {
+    if (!bytes) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let i = 0;
+    let n = bytes;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function nowTimeStr() {
+    return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+/* ---------------- Toast ---------------- */
+function toast(message, type = "info", title = "") {
+    const container = $("#toastContainer");
+    const icons = {
+        success: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+        error: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+        warning: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+        info: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+    };
+    const t = el("div", { class: `toast toast-${type}` }, [
+        el("div", { class: "toast-icon", html: icons[type] || icons.info }),
+        el("div", { class: "toast-body" }, [
+            title ? el("div", { class: "toast-title", text: title }) : null,
+            el("div", { class: "toast-msg", text: message }),
+        ]),
+    ]);
+    container.appendChild(t);
+    setTimeout(() => {
+        t.classList.add("out");
+        setTimeout(() => t.remove(), 200);
+    }, 3800);
+}
+
+/* ============================================================
+   Mock API —— 替换所有真实 fetch 调用
+   ============================================================ */
+async function api(path, options = {}) {
+    // 模拟网络延迟
+    await new Promise((r) => setTimeout(r, 120 + Math.random() * 180));
+    const method = (options.method || "GET").toUpperCase();
+
+    // 招聘类型
+    if (path === "/api/recruitment-types" && method === "GET") {
+        return { recruitment_types: MOCK.recruitmentTypes.slice() };
+    }
+
+    // 记忆
+    if (path === "/api/memory" && method === "GET") {
+        return JSON.parse(JSON.stringify(MOCK.memory));
+    }
+    if (path.startsWith("/api/memory/") && method === "DELETE") {
+        const fieldName = decodeURIComponent(path.split("/api/memory/")[1]);
+        delete MOCK.memory.learned_fields[fieldName];
+        delete MOCK.memory.field_metadata[fieldName];
+        return { ok: true, deleted: fieldName };
+    }
+
+    // 文件
+    if (path === "/api/uploads" && method === "GET") {
+        return { uploads: MOCK.uploads.slice() };
+    }
+    if (path === "/api/upload" && method === "POST") {
+        const fd = options.body;
+        let filename = "未命名文件";
+        let size = 0;
+        let fileType = "other";
+        if (fd && typeof fd.get === "function") {
+            const f = fd.get("file");
+            const t = fd.get("file_type");
+            if (f && f.name) { filename = f.name; size = f.size || 0; }
+            if (t) fileType = t;
+            MOCK.uploads.unshift({
+                filename,
+                file_type: fileType,
+                size,
+                modified_at: new Date().toISOString().slice(0, 10),
+            });
+        }
+        return { filename, file_type: fileType, size };
+    }
+
+    // API 配置
+    if (path === "/api/settings/api") {
+        if (method === "GET") return { ...MOCK.apiSettings };
+        if (method === "PUT") {
+            MOCK.apiSettings = { ...(options.json || {}) };
+            return { ok: true };
+        }
+    }
+
+    // 邮件通知
+    if (path === "/api/settings/notifications") {
+        if (method === "GET") return { ...MOCK.emailSettings };
+        if (method === "PUT") {
+            MOCK.emailSettings = { ...(options.json || {}) };
+            return { ok: true };
+        }
+    }
+
+    // 创建会话
+    if (path === "/api/sessions" && method === "POST") {
+        return {
+            session_id: "demo-" + Math.random().toString(36).slice(2, 10),
+            status: "running",
+        };
+    }
+
+    // 健康检查
+    if (path === "/api/health") {
+        return { status: "ok" };
+    }
+
+    // 会话相关 REST 回退（message / interrupt / confirm）—— 直接返回成功
+    if (path.startsWith("/api/sessions/")) {
+        return { ok: true };
+    }
+
+    // 默认
+    return { ok: true };
+}
+
+/* ---------------- 导航 ---------------- */
+const VIEW_TITLES = {
+    home: "投递任务",
+    files: "文件管理",
+    settings: "系统设置",
+    monitor: "运行监控",
+    memory: "记忆管理",
+};
+
+function switchView(view) {
+    state.currentView = view;
+    $$(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.view === view));
+    $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
+    $("#pageTitle").textContent = VIEW_TITLES[view] || "";
+    $("#sidebar").classList.remove("open");
+    if (view === "files") loadUploads();
+    if (view === "settings") { loadSettings(); loadApiSettings(); }
+    if (view === "memory") loadMemory();
+}
+
+/* ---------------- 投递任务视图 ---------------- */
+function createCompanyRow(data = {}) {
+    const uid = `c${++companyUidCounter}`;
+    const company = {
+        uid,
+        company_name: data.company_name || "",
+        recruitment_type: data.recruitment_type || RECRUITMENT_TYPES[0],
+        referral_code: data.referral_code || "",
+        job_keywords: data.job_keywords || "",
+        preferred_cities: data.preferred_cities || [],
+    };
+    state.companies.push(company);
+
+    const row = el("div", { class: "company-row", "data-uid": uid });
+
+    const head = el("div", { class: "company-row-head" }, [
+        el("div", { class: "company-row-index" }, [
+            el("span", { class: "num", text: state.companies.length }),
+            el("span", { text: "公司" }),
+        ]),
+        el("button", {
+            class: "btn btn-ghost btn-sm btn-remove",
+            title: "移除",
+            onclick: () => removeCompanyRow(uid),
+        }, [
+            el("span", {
+                html: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>',
+            }),
+        ]),
+    ]);
+
+    const typeOptions = RECRUITMENT_TYPES.map(
+        (t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`
+    ).join("");
+
+    const fields = el("div", { class: "company-fields" }, [
+        el("div", {}, [
+            el("label", { class: "field-mini-label", text: "公司名称 *" }),
+            el("input", {
+                class: "input",
+                type: "text",
+                placeholder: "如：字节跳动",
+                value: company.company_name,
+                oninput: (e) => { company.company_name = e.target.value; },
+            }),
+        ]),
+        el("div", {}, [
+            el("label", { class: "field-mini-label", text: "招聘类型" }),
+            el("select", {
+                class: "select",
+                html: typeOptions,
+                onchange: (e) => { company.recruitment_type = e.target.value; },
+            }),
+        ]),
+        el("div", {}, [
+            el("label", { class: "field-mini-label", text: "内推码（可选）" }),
+            el("input", {
+                class: "input",
+                type: "text",
+                placeholder: "如：XYZ123",
+                value: company.referral_code,
+                oninput: (e) => { company.referral_code = e.target.value; },
+            }),
+        ]),
+        el("div", {}, [
+            el("label", { class: "field-mini-label", text: "岗位关键词（可选）" }),
+            el("input", {
+                class: "input",
+                type: "text",
+                placeholder: "如：后端开发 Java",
+                value: company.job_keywords,
+                oninput: (e) => { company.job_keywords = e.target.value; },
+            }),
+        ]),
+        el("div", { class: "full" }, [
+            el("label", { class: "field-mini-label", text: "意向城市（逗号分隔，可选）" }),
+            el("input", {
+                class: "input",
+                type: "text",
+                placeholder: "如：北京,上海,深圳",
+                value: company.preferred_cities.join(","),
+                oninput: (e) => {
+                    company.preferred_cities = e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                },
+            }),
+        ]),
+    ]);
+
+    fields.querySelector("select").value = company.recruitment_type;
+
+    row.appendChild(head);
+    row.appendChild(fields);
+    return row;
+}
+
+function reindexCompanies() {
+    $$("#companyList .company-row").forEach((row, i) => {
+        const num = row.querySelector(".company-row-index .num");
+        if (num) num.textContent = i + 1;
+    });
+}
+
+function removeCompanyRow(uid) {
+    state.companies = state.companies.filter((c) => c.uid !== uid);
+    const row = $(`#companyList .company-row[data-uid="${uid}"]`);
+    if (row) row.remove();
+    reindexCompanies();
+    if (state.companies.length === 0) {
+        $("#companyList").appendChild(createCompanyRow());
+    }
+}
+
+async function loadRecruitmentTypes() {
+    try {
+        const data = await api("/api/recruitment-types");
+        if (data.recruitment_types && data.recruitment_types.length) {
+            state.recruitmentTypes = data.recruitment_types;
+        }
+    } catch (e) {
+        console.warn("加载招聘类型失败", e);
+    }
+}
+
+const FIELD_LABELS = {
+    name: "姓名",
+    english_name: "英文名",
+    gender: "性别",
+    birthday: "生日",
+    phone: "电话",
+    email: "邮箱",
+    id_type: "证件类型",
+    id_number: "证件号",
+    nationality: "国籍",
+    ethnicity: "民族",
+    political_status: "政治面貌",
+    marital_status: "婚姻状况",
+    wechat: "微信",
+    qq: "QQ",
+    province: "省份",
+    city: "城市",
+    address: "地址",
+    zip_code: "邮编",
+    website: "网站",
+    current_city: "当前城市",
+    school: "学校",
+    major: "专业",
+    degree: "学历",
+    gpa: "GPA",
+    self_introduction: "自我介绍",
+};
+
+async function loadUserInfoSummary() {
+    const container = $("#userInfoSummary");
+    try {
+        const mem = await api("/api/memory");
+        const src = mem.source_user_info || {};
+        const keys = [
+            "name", "phone", "email", "gender", "current_city",
+            "school", "major", "degree", "wechat",
+        ];
+        const items = keys
+            .filter((k) => src[k])
+            .map((k) => ({ k: FIELD_LABELS[k] || k, v: src[k] }));
+        if (!items.length) {
+            container.innerHTML = '<div class="info-skel">未找到用户信息</div>';
+            return;
+        }
+        container.innerHTML = "";
+        items.forEach(({ k, v }) => {
+            container.appendChild(
+                el("div", { class: "info-item" }, [
+                    el("div", { class: "k", text: k }),
+                    el("div", { class: "v", text: v }),
+                ])
+            );
+        });
+    } catch (e) {
+        container.innerHTML = `<div class="info-skel">加载失败：${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function startSession() {
+    const companies = state.companies
+        .map((c) => ({
+            company_name: c.company_name.trim(),
+            recruitment_type: c.recruitment_type,
+            referral_code: c.referral_code.trim(),
+            job_keywords: c.job_keywords.trim(),
+            preferred_cities: c.preferred_cities,
+        }))
+        .filter((c) => c.company_name);
+
+    if (!companies.length) {
+        toast("请至少添加一家公司（公司名称必填）", "warning", "无法开始");
+        return;
+    }
+
+    const parallel = $("#parallelMode").checked;
+    const btn = $("#startBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spin"><circle cx="12" cy="12" r="10" stroke-dasharray="40 20"/></svg> 启动中…';
+
+    try {
+        const res = await api("/api/sessions", { method: "POST", json: { companies, parallel } });
+        state.session.id = res.session_id;
+        state.session.companies = {};
+        state.session.phase = null;
+        state.session.completedPhases = new Set();
+        state.session.results = null;
+        state.session.status = res.status;
+        state.session.mockPendingRequest = null;
+        state.session.mockCompany = companies[0].company_name;
+        state.session.mockTimeouts = [];
+        companies.forEach((c) => {
+            state.session.companies[c.company_name] = {
+                status: "pending",
+                phase: null,
+                message: "",
+                form_filled: false,
+                submitted: false,
+                error: "",
+            };
+        });
+        toast(`会话已创建：${res.session_id}`, "success", "开始投递");
+        switchView("monitor");
+        initMonitor();
+        connectWebSocket(res.session_id);
+    } catch (e) {
+        toast(e.message, "error", "创建会话失败");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> 开始投递';
+    }
+}
+
+/* ---------------- 文件管理 ---------------- */
+function setupDropzone() {
+    const dz = $("#dropzone");
+    const input = $("#fileInput");
+
+    dz.addEventListener("click", () => input.click());
+    dz.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            input.click();
+        }
+    });
+
+    ["dragenter", "dragover"].forEach((evt) => {
+        dz.addEventListener(evt, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dz.classList.add("dragover");
+        });
+    });
+    ["dragleave", "drop"].forEach((evt) => {
+        dz.addEventListener(evt, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dz.classList.remove("dragover");
+        });
+    });
+    dz.addEventListener("drop", (e) => {
+        const files = e.dataTransfer.files;
+        if (files && files.length) uploadFiles(files);
+    });
+    input.addEventListener("change", (e) => {
+        if (e.target.files.length) uploadFiles(e.target.files);
+        input.value = "";
+    });
+}
+
+async function uploadFiles(fileList) {
+    const fileType = $("#uploadType").value;
+    const progress = $("#uploadProgress");
+    const fill = $("#uploadProgressFill");
+    const text = $("#uploadProgressText");
+    progress.style.display = "block";
+
+    const files = Array.from(fileList);
+    let done = 0;
+    for (const file of files) {
+        const pct = Math.round((done / files.length) * 100);
+        fill.style.width = pct + "%";
+        text.textContent = `上传中 (${done + 1}/${files.length})：${file.name}`;
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("file_type", fileType);
+            const res = await api("/api/upload", { method: "POST", body: fd });
+            toast(`${res.filename} 已上传`, "success", "上传成功");
+        } catch (e) {
+            toast(`${file.name}：${e.message}`, "error", "上传失败");
+        }
+        done++;
+    }
+    fill.style.width = "100%";
+    text.textContent = `完成 ${done}/${files.length}`;
+    setTimeout(() => { progress.style.display = "none"; fill.style.width = "0%"; }, 1200);
+    loadUploads();
+}
+
+async function loadUploads() {
+    const list = $("#fileList");
+    list.innerHTML = '<div class="empty-state">加载中…</div>';
+    try {
+        const data = await api("/api/uploads");
+        const uploads = data.uploads || [];
+        if (!uploads.length) {
+            list.innerHTML = '<div class="empty-state">暂无文件</div>';
+            return;
+        }
+        list.innerHTML = "";
+        uploads.forEach((u) => {
+            const sizeText = formatSize(u.size);
+            const timeText = u.modified_at || "";
+            list.appendChild(
+                el("div", { class: "file-item" }, [
+                    el("div", { class: "file-icon", html: FILE_ICON_SVG }),
+                    el("div", { class: "file-meta" }, [
+                        el("div", { class: "file-name", text: u.filename }),
+                        el("div", { class: "file-sub", text: `${sizeText} · ${timeText}` }),
+                    ]),
+                    el("span", { class: `badge badge-${u.file_type}`, text: u.file_type }),
+                ])
+            );
+        });
+    } catch (e) {
+        list.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(e.message)}</div>`;
+    }
+}
+
+const FILE_ICON_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+/* ---------------- 通知设置 ---------------- */
+async function loadApiSettings() {
+    try {
+        const s = await api("/api/settings/api");
+        $("#apiBaseUrl").value = s.api_base_url || "";
+        $("#apiKey").value = s.api_key || "";
+        $("#apiModel").value = s.model_name || "";
+    } catch (e) {
+        toast(e.message, "error", "加载 API 配置失败");
+    }
+}
+
+async function saveApiSettings() {
+    const payload = {
+        api_base_url: $("#apiBaseUrl").value.trim(),
+        api_key: $("#apiKey").value.trim(),
+        model_name: $("#apiModel").value.trim(),
+    };
+    const btn = $("#saveApiSettingsBtn");
+    btn.disabled = true;
+    try {
+        await api("/api/settings/api", { method: "PUT", json: payload });
+        toast("API 配置已保存", "success");
+    } catch (e) {
+        toast(e.message, "error", "保存失败");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function loadSettings() {
+    try {
+        const s = await api("/api/settings/notifications");
+        $("#emailEnabled").checked = !!s.email_enabled;
+        $("#smtpServer").value = s.smtp_server || "";
+        $("#smtpPort").value = s.smtp_port || "";
+        $("#smtpUseTls").checked = !!s.smtp_use_tls;
+        $("#smtpSenderEmail").value = s.smtp_sender_email || "";
+        $("#smtpSenderPassword").value = s.smtp_sender_password || "";
+        $("#smtpRecipientEmail").value = s.smtp_recipient_email || "";
+    } catch (e) {
+        toast(e.message, "error", "加载设置失败");
+    }
+}
+
+async function saveSettings() {
+    const payload = {
+        email_enabled: $("#emailEnabled").checked,
+        smtp_server: $("#smtpServer").value.trim(),
+        smtp_port: parseInt($("#smtpPort").value, 10) || 587,
+        smtp_use_tls: $("#smtpUseTls").checked,
+        smtp_sender_email: $("#smtpSenderEmail").value.trim(),
+        smtp_sender_password: $("#smtpSenderPassword").value,
+        smtp_recipient_email: $("#smtpRecipientEmail").value.trim(),
+    };
+    const btn = $("#saveSettingsBtn");
+    btn.disabled = true;
+    try {
+        await api("/api/settings/notifications", { method: "PUT", json: payload });
+        toast("设置已保存", "success");
+    } catch (e) {
+        toast(e.message, "error", "保存失败");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+/* ---------------- 记忆管理 ---------------- */
+async function loadMemory() {
+    const tbody = $("#memoryTableBody");
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">加载中…</td></tr>';
+    try {
+        const data = await api("/api/memory");
+        const learned = data.learned_fields || {};
+        const source = data.source_user_info || {};
+        const meta = data.field_metadata || {};
+
+        const allKeys = new Set([...Object.keys(learned), ...Object.keys(source)]);
+        if (!allKeys.size) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">暂无记忆数据</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = "";
+        allKeys.forEach((k) => {
+            const isLearned = k in learned;
+            const value = isLearned ? learned[k] : source[k];
+            const m = meta[k] || {};
+            const sourceLabel = isLearned
+                ? '<span class="source-tag source-learned">补充</span>'
+                : '<span class="source-tag source-source">原始</span>';
+            const valueText = typeof value === "object"
+                ? JSON.stringify(value)
+                : String(value ?? "");
+            const tr = el("tr", {}, [
+                el("td", { class: "field-name", text: k }),
+                el("td", { class: "field-value", text: valueText }),
+                el("td", { class: "field-source", html: sourceLabel }),
+                el("td", { class: "field-time", text: formatTime(m.timestamp) }),
+                el("td", { text: m.reason || "—" }),
+                el("td", {}, isLearned
+                    ? [el("button", {
+                        class: "btn btn-outline-danger btn-sm",
+                        text: "删除",
+                        onclick: () => deleteMemory(k),
+                    })]
+                    : [el("span", { class: "field-source", text: "—" })]
+                ),
+            ]);
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">加载失败：${escapeHtml(e.message)}</td></tr>`;
+    }
+}
+
+async function deleteMemory(fieldName) {
+    if (!confirm(`确认删除字段「${fieldName}」？`)) return;
+    try {
+        await api(`/api/memory/${encodeURIComponent(fieldName)}`, { method: "DELETE" });
+        toast(`已删除 ${fieldName}`, "success");
+        loadMemory();
+    } catch (e) {
+        toast(e.message, "error", "删除失败");
+    }
+}
+
+/* ============================================================
+   WebSocket 模拟 —— 替换真实 WS 连接，触发完整工作流
+   ============================================================ */
+function setConnStatus(state_) {
+    const pill = $("#connPill");
+    const text = $("#connText");
+    pill.classList.remove("connected", "connecting", "error");
+    if (state_ === "connected") {
+        pill.classList.add("connected");
+        text.textContent = "已连接";
+    } else if (state_ === "connecting") {
+        pill.classList.add("connecting");
+        text.textContent = "连接中…";
+    } else if (state_ === "error") {
+        pill.classList.add("error");
+        text.textContent = "连接错误";
+    } else {
+        text.textContent = "未连接";
+    }
+}
+
+function connectWebSocket(sessionId) {
+    setConnStatus("connecting");
+    // 模拟连接建立
+    setTimeout(() => {
+        setConnStatus("connected");
+        addLog("success", `WebSocket 已连接 (session=${sessionId})`);
+        updateSessionStatus("running");
+        setTimeout(() => startMockWorkflow(sessionId), 300);
+    }, 500);
+}
+
+/* 启动完整模拟工作流：搜索 → 推荐 → (HITL 岗位选择) → 润色 → (HITL 简历审核) → 填表 → (HITL 确认) → 投递 → 完成 */
+function startMockWorkflow(sessionId) {
+    const companyNames = Object.keys(state.session.companies);
+    const company = state.session.mockCompany || companyNames[0] || "字节跳动";
+
+    // 阶段 1：搜索（1.5s）
+    scheduleMock(100, () => {
+        handleWsMessage({ type: "log", level: "info", message: `开始处理 ${companyNames.length} 家公司` });
+        handleWsMessage({ type: "agent_message", content: `已开始为「${company}」执行投递流程，正在搜索匹配的岗位。` });
+        handleWsMessage({ type: "progress", phase: "search", company, message: `正在搜索${company}的岗位...` });
+    });
+
+    // 阶段 2：推荐（1.5s 后）
+    scheduleMock(1600, () => {
+        handleWsMessage({ type: "log", level: "info", message: "搜索完成，找到 5 个匹配岗位" });
+        handleWsMessage({ type: "progress", phase: "recommend", company, message: "找到 5 个匹配岗位，正在生成推荐..." });
+    });
+
+    // HITL：岗位选择（推荐阶段开始后 1s）
+    scheduleMock(2600, () => {
+        handleWsMessage({ type: "log", level: "info", message: "生成岗位推荐完成，等待用户选择" });
+        handleWsMessage({
+            type: "request",
+            request_type: "position_selection",
+            request_id: "req_pos_1",
+            positions: JSON.parse(JSON.stringify(MOCK.positions)),
+        });
+        state.session.mockPendingRequest = "req_pos_1";
+    });
+}
+
+/* 调度模拟事件，便于追踪和清理 */
+function scheduleMock(delay, fn) {
+    const id = setTimeout(() => {
+        try { fn(); } catch (e) { console.error(e); }
+    }, delay);
+    state.session.mockTimeouts.push(id);
+    return id;
+}
+
+function clearMockTimeouts() {
+    state.session.mockTimeouts.forEach((id) => clearTimeout(id));
+    state.session.mockTimeouts = [];
+}
+
+/* 模拟 WS 响应：根据 request_id 继续推进工作流 */
+function sendWsResponse(requestId, data) {
+    // 用 setTimeout 让 closeModal 先执行
+    setTimeout(() => continueMockWorkflow(requestId, data), 0);
+    return true;
+}
+
+function continueMockWorkflow(requestId, data) {
+    const company = state.session.mockCompany || "字节跳动";
+    state.session.mockPendingRequest = null;
+
+    if (requestId === "req_pos_1") {
+        // 岗位选择完成 → 润色阶段
+        scheduleMock(400, () => {
+            handleWsMessage({ type: "log", level: "success", message: "岗位选择已确认，开始润色简历" });
+            handleWsMessage({ type: "agent_message", content: "已根据您选择的岗位开始润色简历，对比结果稍后请审核。" });
+            handleWsMessage({ type: "progress", phase: "polish", company, message: "正在根据 JD 润色简历..." });
+        });
+        scheduleMock(2400, () => {
+            handleWsMessage({ type: "log", level: "info", message: "简历润色完成，等待用户审核" });
+            handleWsMessage({
+                type: "request",
+                request_type: "resume_review",
+                request_id: "req_res_1",
+                original: JSON.parse(JSON.stringify(MOCK.resumeOriginal)),
+                polished: JSON.parse(JSON.stringify(MOCK.resumePolished)),
+            });
+            state.session.mockPendingRequest = "req_res_1";
+        });
+    } else if (requestId === "req_res_1") {
+        // 简历审核完成 → 填表阶段
+        scheduleMock(400, () => {
+            handleWsMessage({ type: "log", level: "success", message: "简历审核完成，开始填写投递表单" });
+            handleWsMessage({ type: "agent_message", content: "简历已确认，正在自动填写投递表单。" });
+            handleWsMessage({ type: "progress", phase: "fill", company, message: "正在填写投递表单..." });
+        });
+        scheduleMock(1500, () => {
+            handleWsMessage({ type: "screenshot", company, path: `/screenshots/${company}_form.png` });
+            handleWsMessage({ type: "log", level: "info", message: "表单填写完成，等待用户确认提交" });
+        });
+        scheduleMock(2200, () => {
+            handleWsMessage({
+                type: "request",
+                request_type: "confirmation",
+                request_id: "req_conf_1",
+                title: "确认提交投递",
+                message: `即将为「${company}」提交投递「${MOCK.positions[0].name}」，是否确认提交？`,
+                options: ["确认提交", "取消"],
+            });
+            state.session.mockPendingRequest = "req_conf_1";
+        });
+    } else if (requestId === "req_conf_1") {
+        // 用户取消
+        if (data && data.selected === "取消") {
+            scheduleMock(400, () => {
+                handleWsMessage({ type: "log", level: "warning", message: "用户取消提交，会话终止" });
+                handleWsMessage({ type: "agent_message", content: "您已取消本次投递，会话已终止。可前往「投递任务」重新开始。" });
+                state.session.status = "error";
+                updateSessionStatus("error");
+                setConnStatus("idle");
+            });
+            return;
+        }
+        // 确认提交 → 投递阶段
+        scheduleMock(400, () => {
+            handleWsMessage({ type: "log", level: "info", message: "用户确认提交，开始投递" });
+            handleWsMessage({ type: "agent_message", content: "已收到您的确认，正在提交投递..." });
+            handleWsMessage({ type: "progress", phase: "submit", company, message: "正在提交投递..." });
+        });
+        scheduleMock(1900, () => {
+            handleWsMessage({ type: "screenshot", company, path: `/screenshots/${company}_success.png` });
+            handleWsMessage({
+                type: "result",
+                company,
+                result: {
+                    submitted: true,
+                    form_filled: true,
+                    error_message: "",
+                    position: MOCK.positions[0].name,
+                    apply_url: "https://jobs.example.com/apply/abc123",
+                },
+            });
+        });
+        scheduleMock(2400, () => {
+            const results = {};
+            Object.keys(state.session.companies).forEach((c) => {
+                results[c] = {
+                    submitted: true,
+                    form_filled: true,
+                    position: MOCK.positions[0].name,
+                    apply_url: "https://jobs.example.com/apply/abc123",
+                    submitted_at: new Date().toISOString(),
+                };
+            });
+            handleWsMessage({ type: "session_complete", results });
+            setConnStatus("idle");
+        });
+    } else if (requestId === "req_login_1") {
+        // 登录确认
+        scheduleMock(400, () => {
+            handleWsMessage({ type: "log", level: "success", message: "登录状态已确认，继续流程" });
+        });
+    }
+}
+
+/* ---------------- WebSocket 消息处理 ---------------- */
+function handleWsMessage(msg) {
+    switch (msg.type) {
+        case "progress":
+            handleProgress(msg);
+            break;
+        case "screenshot":
+            handleScreenshot(msg);
+            break;
+        case "log":
+            addLog(msg.level || "info", msg.message || "");
+            break;
+        case "request":
+            handleRequest(msg);
+            break;
+        case "result":
+            handleResult(msg);
+            break;
+        case "session_complete":
+            handleSessionComplete(msg);
+            break;
+        case "error":
+            addLog("error", msg.message || "未知错误");
+            toast(msg.message || "错误", "error", "Agent 错误");
+            break;
+        case "agent_message":
+            state.chat.messages.push({
+                role: "agent",
+                content: msg.content || "",
+                time: nowTimeStr(),
+            });
+            renderChatMessages();
+            addLog("info", `[对话] Agent：${msg.content || ""}`);
+            break;
+        case "message_status":
+            if (msg.status) {
+                addLog("info", `[对话] 消息状态：${msg.status}${msg.message ? " - " + msg.message : ""}`);
+            }
+            break;
+        default:
+            console.debug("未处理的消息类型", msg);
+    }
+}
+
+function handleProgress(msg) {
+    const phase = msg.phase;
+    const company = msg.company || "";
+    const message = msg.message || "";
+
+    if (phase && PHASE_INDEX[phase] !== undefined) {
+        if (state.session.phase && PHASE_INDEX[state.session.phase] < PHASE_INDEX[phase]) {
+            state.session.completedPhases.add(state.session.phase);
+        }
+        state.session.phase = phase;
+    }
+
+    if (company && state.session.companies[company]) {
+        const c = state.session.companies[company];
+        c.phase = phase || c.phase;
+        c.message = message;
+        if (phase === "submit") {
+            c.submitted = true;
+            c.status = "completed";
+        } else if (phase === "fill") {
+            c.form_filled = true;
+            c.status = "running";
+        } else if (phase) {
+            c.status = "running";
+        }
+    }
+
+    addLog("info", `[${company || "全局"}] ${phaseLabel(phase)} ${message}`);
+    renderTimeline();
+    renderCompanyCards();
+}
+
+function phaseLabel(phase) {
+    if (!phase) return "";
+    const p = PHASES.find((x) => x.key === phase);
+    return p ? p.label : phase;
+}
+
+function handleScreenshot(msg) {
+    const card = $("#screenshotCard");
+    card.style.display = "block";
+    const grid = $("#screenshotGrid");
+    const item = el("div", { class: "screenshot-item" }, [
+        el("div", { class: "screenshot-thumb", html: SCREENSHOT_PLACEHOLDER }),
+        el("div", { class: "screenshot-meta" }, [
+            el("div", { class: "company", text: msg.company || "未知公司" }),
+            el("div", { class: "path", text: msg.path || "", title: msg.path || "" }),
+        ]),
+    ]);
+    grid.insertBefore(item, grid.firstChild);
+    addLog("info", `[${msg.company || ""}] 截图：${msg.path || ""}`);
+}
+
+const SCREENSHOT_PLACEHOLDER = '<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+
+function handleResult(msg) {
+    const company = msg.company || "";
+    if (company && state.session.companies[company]) {
+        const r = msg.result || {};
+        state.session.companies[company].status = r.submitted ? "completed" : "error";
+        state.session.companies[company].submitted = !!r.submitted;
+        state.session.companies[company].form_filled = !!r.form_filled;
+        if (r.error_message) state.session.companies[company].error = r.error_message;
+    }
+    addLog("success", `[${company}] 投递结果：${JSON.stringify(msg.result || {})}`);
+    renderCompanyCards();
+}
+
+function handleSessionComplete(msg) {
+    state.session.status = "completed";
+    state.session.results = msg.results || {};
+    updateSessionStatus("completed");
+    addLog("success", "会话已完成");
+    toast("投递会话已完成", "success", "完成");
+    handleWsMessage({ type: "agent_message", content: "🎉 投递流程已全部完成！您可在下方查看会话结果与截图。" });
+
+    const card = $("#resultCard");
+    card.style.display = "block";
+    $("#resultPre").textContent = JSON.stringify(msg.results, null, 2);
+    renderCompanyCards();
+}
+
+/* ---------------- 监控视图渲染 ---------------- */
+function initMonitor() {
+    $("#monitorEmpty").style.display = "none";
+    $("#monitorWrap").style.display = "block";
+    $("#screenshotCard").style.display = "none";
+    $("#screenshotGrid").innerHTML = "";
+    $("#resultCard").style.display = "none";
+    $("#resultPre").textContent = "";
+    $("#logPanel").innerHTML = '<div class="log-empty">等待日志…</div>';
+
+    state.chat.messages = [];
+    renderChatMessages();
+
+    const meta = $("#sessionMeta");
+    meta.textContent = `会话 ID：${state.session.id}`;
+
+    updateSessionStatus(state.session.status || "pending");
+    renderTimeline();
+    renderCompanyCards();
+}
+
+function updateSessionStatus(status) {
+    state.session.status = status;
+    const map = {
+        pending: { text: "等待中", cls: "status-pending" },
+        running: { text: "运行中", cls: "status-running" },
+        completed: { text: "已完成", cls: "status-completed" },
+        error: { text: "出错", cls: "status-error" },
+        disconnected: { text: "已断开", cls: "status-disconnected" },
+    };
+    const m = map[status] || map.pending;
+    $("#sessionStatus").innerHTML = `<span class="status-badge ${m.cls}">${m.text}</span>`;
+    const interruptBtn = $("#interruptBtn");
+    if (interruptBtn) {
+        interruptBtn.style.display = status === "running" ? "inline-flex" : "none";
+    }
+}
+
+function renderTimeline() {
+    const tl = $("#phaseTimeline");
+    tl.innerHTML = "";
+    const currentIdx = state.session.phase ? PHASE_INDEX[state.session.phase] : -1;
+    PHASES.forEach((p, i) => {
+        let cls = "";
+        if (currentIdx >= 0) {
+            if (i < currentIdx || state.session.completedPhases.has(p.key)) cls = "done";
+            else if (i === currentIdx) cls = "current";
+        }
+        const node = el("div", { class: `phase ${cls}` }, [
+            el("div", { class: "phase-node", text: i + 1 }),
+            el("div", { class: "phase-label", text: p.label }),
+        ]);
+        tl.appendChild(node);
+    });
+}
+
+function renderCompanyCards() {
+    const wrap = $("#companyCards");
+    const companies = state.session.companies;
+    const names = Object.keys(companies);
+    if (!names.length) {
+        wrap.innerHTML = '<div class="empty-state">暂无公司</div>';
+        return;
+    }
+    wrap.innerHTML = "";
+    names.forEach((name) => {
+        const c = companies[name];
+        const cls = c.status || "pending";
+        const card = el("div", { class: `company-card ${cls}` }, [
+            el("div", { class: "company-card-head" }, [
+                el("div", { class: "company-name", text: name }),
+                el("span", { class: `status-badge status-${cls}` }, [
+                    el("span", { text: STATUS_TEXT[c.status] || c.status || "等待中" }),
+                ]),
+            ]),
+            el("div", { class: "company-card-meta" }, [
+                el("span", { class: `meta-chip ${c.form_filled ? "ok" : "no"}`, text: `填表 ${c.form_filled ? "✓" : "✗"}` }),
+                el("span", { class: `meta-chip ${c.submitted ? "ok" : "no"}`, text: `投递 ${c.submitted ? "✓" : "✗"}` }),
+                c.phase ? el("span", { class: "meta-chip", text: `阶段：${phaseLabel(c.phase)}` }) : null,
+            ]),
+            c.message ? el("div", { class: "company-current-phase", text: c.message }) : null,
+            c.error ? el("div", { class: "company-error", text: c.error }) : null,
+        ]);
+        wrap.appendChild(card);
+    });
+}
+
+const STATUS_TEXT = {
+    pending: "等待中",
+    running: "运行中",
+    completed: "已完成",
+    error: "出错",
+    disconnected: "已断开",
+};
+
+/* ---------------- 日志面板 ---------------- */
+function addLog(level, message) {
+    const panel = $("#logPanel");
+    const empty = panel.querySelector(".log-empty");
+    if (empty) empty.remove();
+
+    const line = el("div", { class: `log-line ${level || "info"}` }, [
+        el("span", { class: "log-time", text: nowTimeStr() }),
+        el("span", { class: `log-tag ${level || "info"}`, text: (level || "info").toUpperCase() }),
+        el("span", { class: "log-msg", text: message }),
+    ]);
+    panel.appendChild(line);
+    panel.scrollTop = panel.scrollHeight;
+
+    while (panel.children.length > 500) panel.removeChild(panel.firstChild);
+}
+
+/* ---------------- 对话区域 ---------------- */
+function renderChatMessages() {
+    const container = $("#chatMessages");
+    if (!container) return;
+    container.innerHTML = "";
+    if (!state.chat.messages.length) {
+        container.innerHTML = '<div class="chat-empty">暂无对话，可在下方输入消息指导 Agent</div>';
+        return;
+    }
+    state.chat.messages.forEach((m) => {
+        const isUser = m.role === "user";
+        const node = el("div", { class: isUser ? "chat-msg-user" : "chat-msg-agent" }, [
+            el("div", { class: "chat-msg-content", text: m.content }),
+            m.time ? el("div", { class: "chat-msg-time", text: m.time }) : null,
+        ]);
+        container.appendChild(node);
+    });
+    container.scrollTop = container.scrollHeight;
+}
+
+/* 模拟版发送消息：用户消息立即显示，1s 后 Agent 回复 */
+function sendChatMessage(text) {
+    text = (text || "").trim();
+    if (!text) return;
+    if (!state.session.id) {
+        toast("请先启动投递任务", "warning", "无法发送");
+        return;
+    }
+    state.chat.messages.push({
+        role: "user",
+        content: text,
+        time: nowTimeStr(),
+    });
+    renderChatMessages();
+    addLog("info", `[对话] 用户：${text}`);
+    const input = $("#chatInput");
+    if (input) input.value = "";
+
+    // 模拟 Agent 回复
+    const replies = [
+        "收到，我会根据您的指示继续执行。",
+        "好的，已记录您的反馈，正在调整策略。",
+        "明白，正在为您处理中，请稍候。",
+        "已收到您的消息，Agent 将在当前阶段完成后处理。",
+        "了解，已将您的指示纳入后续流程。",
+    ];
+    const reply = replies[Math.floor(Math.random() * replies.length)];
+    setTimeout(() => {
+        handleWsMessage({ type: "agent_message", content: reply });
+    }, 1000);
+}
+
+function interruptAgent(text) {
+    text = (text || "").trim();
+    if (!state.session.id) {
+        toast("请先启动投递任务", "warning", "无法中断");
+        return;
+    }
+    state.chat.messages.push({
+        role: "user",
+        content: `[中断并重试] ${text}`,
+        time: nowTimeStr(),
+    });
+    renderChatMessages();
+    addLog("warning", `[对话] 用户中断并重试：${text}`);
+    // 模拟 Agent 响应中断
+    setTimeout(() => {
+        handleWsMessage({ type: "agent_message", content: "已收到中断指令，正在按新指令重试当前阶段。" });
+    }, 800);
+}
+
+/* ---------------- HITL 请求处理 ---------------- */
+function handleRequest(msg) {
+    const reqType = msg.request_type;
+    const requestId = msg.request_id;
+    addLog("info", `收到人工请求：${reqType} (id=${requestId})`);
+
+    const badge = $("#monitorBadge");
+    badge.style.display = "inline-flex";
+    badge.textContent = "!";
+
+    switch (reqType) {
+        case "confirmation":
+            showConfirmation(msg);
+            break;
+        case "missing_fields":
+            showMissingFields(msg);
+            break;
+        case "resume_review":
+            showResumeReview(msg);
+            break;
+        case "position_selection":
+            showPositionSelection(msg);
+            break;
+        case "user_login":
+            showLoginRequestPanel(msg);
+            break;
+        default:
+            console.warn("未知请求类型", reqType, msg);
+            toast(`未知请求类型：${reqType}`, "warning");
+    }
+}
+
+function openModal(title, bodyNode, footerNode) {
+    $("#modalTitle").textContent = title;
+    const body = $("#modalBody");
+    body.innerHTML = "";
+    if (bodyNode) body.appendChild(bodyNode);
+    const footer = $("#modalFooter");
+    footer.innerHTML = "";
+    if (footerNode) footer.appendChild(footerNode);
+    $("#modalMask").classList.add("open");
+}
+
+function closeModal() {
+    $("#modalMask").classList.remove("open");
+    const badge = $("#monitorBadge");
+    badge.style.display = "none";
+}
+
+function respond(requestId, responseType, data) {
+    const ok = sendWsResponse(requestId, data);
+    if (ok) {
+        addLog("success", `已响应请求 ${requestId}`);
+        closeModal();
+    }
+}
+
+/* —— confirmation —— */
+function showConfirmation(msg) {
+    const options = msg.options || [];
+    const body = el("div", {}, [
+        el("div", { class: "confirm-msg", text: msg.message || "" }),
+    ]);
+    const footer = el("div", { class: "confirm-options" }, options.map((opt) =>
+        el("button", {
+            class: "btn btn-soft",
+            text: opt,
+            onclick: () => respond(msg.request_id, "confirmation", { selected: opt }),
+        })
+    ));
+    openModal(msg.title || "请确认", body, footer);
+}
+
+/* —— missing_fields —— */
+function showMissingFields(msg) {
+    const fields = msg.fields || [];
+    const body = el("div", {});
+    const inputs = {};
+
+    fields.forEach((f) => {
+        const name = f.name || "";
+        const label = f.label || name;
+        const reason = f.reason || "";
+        const group = el("div", { class: "hform-field" }, [
+            el("label", { class: "field-label", text: label }),
+            el("input", {
+                class: "input",
+                type: "text",
+                placeholder: `请输入${label}`,
+                oninput: (e) => { inputs[name] = e.target.value; },
+            }),
+            reason ? el("div", { class: "reason", text: `原因：${reason}` }) : null,
+        ]);
+        body.appendChild(group);
+    });
+
+    const footer = el("div", {}, [
+        el("button", {
+            class: "btn btn-primary",
+            text: "提交",
+            onclick: () => {
+                const missing = fields.filter((f) => !inputs[f.name]);
+                if (missing.length) {
+                    toast(`请填写：${missing.map((m) => m.label || m.name).join("、")}`, "warning");
+                    return;
+                }
+                respond(msg.request_id, "missing_fields", { fields: inputs });
+            },
+        }),
+        el("button", { class: "btn btn-ghost", text: "取消", onclick: closeModal }),
+    ]);
+    openModal("需要补充字段", body, footer);
+}
+
+/* —— resume_review —— */
+function showResumeReview(msg) {
+    const original = msg.original || {};
+    const polished = msg.polished || {};
+    const editable = {};
+
+    const body = el("div", {}, [
+        el("p", {
+            style: "margin: 0 0 12px; font-size: 13px; color: var(--gray-600);",
+            text: "对比原始与润色后的简历内容。可在右侧编辑后提交，或直接采用润色版本。",
+        }),
+    ]);
+
+    const compare = el("div", { class: "resume-compare" });
+    const origCol = el("div", { class: "resume-col" }, [el("h4", { text: "原始内容" })]);
+    const polCol = el("div", { class: "resume-col polished" }, [el("h4", { text: "润色内容（可编辑）" })]);
+
+    Object.keys(RESUME_LABELS).forEach((key) => {
+        const origVal = original[key];
+        const polVal = polished[key];
+
+        origCol.appendChild(
+            el("div", { class: "resume-section" }, [
+                el("div", { class: "resume-section-label", text: RESUME_LABELS[key] }),
+                el("div", {
+                    class: "resume-section-value",
+                    text: formatResumeValue(origVal) || "—",
+                }),
+            ])
+        );
+
+        const textVal = formatResumeValue(polVal);
+        editable[key] = textVal;
+        const textarea = el("textarea", {
+            rows: key === "self_introduction" || key === "summary" ? 4 : 5,
+        });
+        textarea.value = textVal;
+        textarea.addEventListener("input", () => { editable[key] = textarea.value; });
+
+        polCol.appendChild(
+            el("div", { class: "resume-section" }, [
+                el("div", { class: "resume-section-label", text: RESUME_LABELS[key] }),
+                textarea,
+            ])
+        );
+    });
+
+    compare.appendChild(origCol);
+    compare.appendChild(polCol);
+    body.appendChild(compare);
+
+    const footer = el("div", {}, [
+        el("button", {
+            class: "btn btn-ghost",
+            text: "直接采用润色版",
+            onclick: () => respond(msg.request_id, "resume_review", { confirmed: polished }),
+        }),
+        el("button", {
+            class: "btn btn-primary",
+            text: "提交编辑后内容",
+            onclick: () => {
+                const confirmed = {};
+                Object.keys(editable).forEach((k) => {
+                    const originalPolVal = polished[k];
+                    if (Array.isArray(originalPolVal)) {
+                        const lines = editable[k].split("\n").map((s) => s.trim()).filter(Boolean);
+                        confirmed[k] = lines.map((line) => {
+                            try { return JSON.parse(line); }
+                            catch { return { value: line }; }
+                        });
+                    } else {
+                        confirmed[k] = editable[k];
+                    }
+                });
+                respond(msg.request_id, "resume_review", { confirmed });
+            },
+        }),
+        el("button", { class: "btn btn-ghost", text: "取消", onclick: closeModal }),
+    ]);
+    openModal("简历润色审核", body, footer);
+}
+
+function formatResumeValue(val) {
+    if (val == null) return "";
+    if (typeof val === "string") return val;
+    if (Array.isArray(val)) {
+        return val.map((item) =>
+            typeof item === "object" ? JSON.stringify(item, null, 2) : String(item)
+        ).join("\n");
+    }
+    if (typeof val === "object") return JSON.stringify(val, null, 2);
+    return String(val);
+}
+
+/* —— position_selection —— */
+function showPositionSelection(msg) {
+    const positions = msg.positions || [];
+    const selected = [];
+
+    const body = el("div", {}, [
+        el("p", {
+            style: "margin: 0 0 12px; font-size: 13px; color: var(--gray-600);",
+            text: "选择要投递的岗位。点击岗位卡片选择/取消，再次点击调整志愿顺序。",
+        }),
+    ]);
+    const list = el("div", { class: "position-list" });
+    body.appendChild(list);
+
+    function render() {
+        list.innerHTML = "";
+        positions.forEach((pos, idx) => {
+            const orderIdx = selected.findIndex((s) => s.__idx === idx);
+            const isSelected = orderIdx >= 0;
+            const order = orderIdx >= 0 ? orderIdx + 1 : null;
+
+            const item = el("div", { class: `position-item ${isSelected ? "selected" : ""}` }, [
+                el("div", { class: "position-order", text: order || idx + 1 }),
+                el("div", { class: "position-body" }, [
+                    el("div", { class: "position-name", text: pos.name || pos.title || `岗位 ${idx + 1}` }),
+                    pos.location ? el("div", { class: "position-meta", text: `地点：${pos.location}` }) : null,
+                    pos.reason ? el("div", { class: "position-reason", text: `推荐理由：${pos.reason}` }) : null,
+                    pos.jd ? el("div", { class: "position-jd", text: pos.jd }) : null,
+                ]),
+                el("div", { class: "position-actions" }, [
+                    el("button", {
+                        class: `btn ${isSelected ? "btn-outline-danger" : "btn-soft"} btn-sm`,
+                        text: isSelected ? "移除" : "选择",
+                        onclick: (e) => {
+                            e.stopPropagation();
+                            if (isSelected) {
+                                selected.splice(orderIdx, 1);
+                            } else {
+                                selected.push({ ...pos, __idx: idx });
+                            }
+                            render();
+                        },
+                    }),
+                ]),
+            ]);
+            list.appendChild(item);
+        });
+        // 更新已选计数
+        const counter = $("#posSelectedCount");
+        if (counter) counter.textContent = `已选 ${selected.length} 个岗位`;
+    }
+    render();
+
+    const footer = el("div", {}, [
+        el("span", {
+            id: "posSelectedCount",
+            style: "margin-right: auto; align-self: center; font-size: 12px; color: var(--gray-600);",
+            text: `已选 ${selected.length} 个岗位`,
+        }),
+        el("button", {
+            class: "btn btn-primary",
+            text: "提交选择",
+            onclick: () => {
+                if (!selected.length) {
+                    toast("请至少选择一个岗位", "warning");
+                    return;
+                }
+                const payload = selected.map((s, i) => {
+                    const copy = { ...s };
+                    delete copy.__idx;
+                    copy.volunteer_order = i + 1;
+                    return copy;
+                });
+                respond(msg.request_id, "position_selection", { selected_positions: payload });
+            },
+        }),
+        el("button", { class: "btn btn-ghost", text: "取消", onclick: closeModal }),
+    ]);
+    openModal("选择投递岗位", body, footer);
+}
+
+/* —— user_login —— */
+function showLoginRequestPanel(msg) {
+    const loginUrl = msg.login_url || "https://example.com/login";
+    const message = msg.message || "需要您在浏览器中完成目标网站登录。";
+
+    const body = el("div", {}, [
+        el("div", {
+            class: "confirm-msg",
+            style: "white-space: pre-wrap;",
+            text: message,
+        }),
+        el("div", { class: "login-url-row" }, [
+            el("label", { class: "field-label", text: "登录页地址" }),
+            el("div", { class: "login-url-box" }, [
+                el("input", {
+                    class: "input login-url-input",
+                    type: "text",
+                    value: loginUrl,
+                    readonly: "true",
+                }),
+                el("button", {
+                    class: "btn btn-soft btn-sm",
+                    text: "复制",
+                    onclick: () => {
+                        const inp = body.querySelector(".login-url-input");
+                        if (!inp) return;
+                        inp.select();
+                        try {
+                            navigator.clipboard.writeText(inp.value);
+                            toast("已复制登录页地址", "success");
+                        } catch (e) {
+                            try { document.execCommand("copy"); toast("已复制登录页地址", "success"); }
+                            catch { toast("复制失败，请手动选择复制", "warning"); }
+                        }
+                    },
+                }),
+                el("a", {
+                    class: "btn btn-ghost btn-sm",
+                    href: loginUrl,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    text: "在新窗口打开",
+                }),
+            ]),
+        ]),
+        el("p", {
+            style: "margin: 12px 0 0; font-size: 12px; color: var(--gray-500);",
+            text: "请在弹出的浏览器窗口中完成登录/注册，完成后点击下方「已完成登录」按钮。",
+        }),
+    ]);
+
+    const footer = el("div", {}, [
+        el("button", {
+            class: "btn btn-ghost",
+            text: "重新检测",
+            onclick: () => respond(msg.request_id, "user_login", { status: "retry" }),
+        }),
+        el("button", {
+            class: "btn btn-primary",
+            text: "已完成登录",
+            onclick: () => respond(msg.request_id, "user_login", { status: "logged_in" }),
+        }),
+    ]);
+    openModal("🔐 需要登录", body, footer);
+}
+
+/* ---------------- 健康检查 ---------------- */
+async function checkHealth() {
+    try {
+        const r = await api("/api/health");
+        toast(`后端状态：${r.status}（Demo 模拟）`, "success", "健康检查");
+    } catch (e) {
+        toast(e.message, "error", "后端不可达");
+    }
+}
+
+/* ---------------- 初始化 ---------------- */
+function init() {
+    // 导航
+    $$(".nav-item").forEach((n) => {
+        n.addEventListener("click", (e) => {
+            e.preventDefault();
+            switchView(n.dataset.view);
+        });
+    });
+    $("#menuToggle").addEventListener("click", () => {
+        $("#sidebar").classList.toggle("open");
+    });
+
+    // 数据跳转
+    document.addEventListener("click", (e) => {
+        const t = e.target.closest("[data-jump]");
+        if (t) {
+            switchView(t.dataset.jump);
+        }
+    });
+
+    // 投递任务
+    $("#addCompanyBtn").addEventListener("click", () => {
+        $("#companyList").appendChild(createCompanyRow());
+        reindexCompanies();
+    });
+    $("#startBtn").addEventListener("click", startSession);
+
+    // 文件管理
+    setupDropzone();
+    $("#refreshFilesBtn").addEventListener("click", loadUploads);
+
+    // 通知设置
+    $("#saveSettingsBtn").addEventListener("click", saveSettings);
+    $("#resetSettingsBtn").addEventListener("click", loadSettings);
+    // API 配置
+    $("#saveApiSettingsBtn").addEventListener("click", saveApiSettings);
+    $("#resetApiSettingsBtn").addEventListener("click", loadApiSettings);
+
+    // 监控
+    $("#clearLogBtn").addEventListener("click", () => {
+        $("#logPanel").innerHTML = '<div class="log-empty">日志已清空</div>';
+    });
+    $("#clearScreenshotsBtn").addEventListener("click", () => {
+        $("#screenshotGrid").innerHTML = "";
+        $("#screenshotCard").style.display = "none";
+    });
+
+    // 对话区域
+    $("#chatSendBtn").addEventListener("click", () => {
+        sendChatMessage($("#chatInput").value);
+    });
+    $("#chatInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage(e.target.value);
+        }
+    });
+    $("#interruptBtn").addEventListener("click", () => {
+        const text = prompt("请输入新的指令，Agent 将中断当前流程并按新指令重试：");
+        if (text !== null) {
+            interruptAgent(text.trim());
+        }
+    });
+
+    // 记忆
+    $("#refreshMemoryBtn").addEventListener("click", loadMemory);
+
+    // 模态
+    $("#modalClose").addEventListener("click", closeModal);
+    $("#modalMask").addEventListener("click", (e) => {
+        if (e.target.id === "modalMask") closeModal();
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && $("#modalMask").classList.contains("open")) closeModal();
+    });
+
+    // 顶栏
+    $("#healthBtn").addEventListener("click", checkHealth);
+
+    // 初始数据
+    setConnStatus("idle");
+    // 预填一家公司，方便演示直接点击「开始投递」
+    $("#companyList").appendChild(createCompanyRow({
+        company_name: "字节跳动",
+        recruitment_type: "校招",
+        job_keywords: "后端开发 Java",
+        preferred_cities: ["北京", "上海"],
+    }));
+
+    // 并行加载初始数据
+    loadRecruitmentTypes();
+    loadUserInfoSummary();
+}
+
+document.addEventListener("DOMContentLoaded", init);
+
+})();
+    </script>
+</body>
+</html>
