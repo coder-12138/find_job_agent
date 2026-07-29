@@ -1,6 +1,6 @@
 # 简历自动投递 Agent (LangChain/LangGraph 版)
 
-基于 **LangChain** 和 **LangGraph** 框架的智能简历投递 Agent，能够根据用户提供的简历和个人信息文档，自动完成校招网申的批量投递工作。本仓库为项目的 LangChain/LangGraph 实现版本。
+基于 **LangChain** 和 **LangGraph** 框架的智能简历投递 Agent，能够根据用户提供的简历和个人信息文档，自动完成校招网申的批量投递工作。本仓库为项目的 LangChain/LangGraph 实现版本。使用WebUI与agent进行交互的实现效果，可以参考B站演示视频：【OfferBot（agent大赛演示视频）】 <https://www.bilibili.com/video/BV1763z6BEz7/?share_source=copy_web&vd_source=fb3f8e7af75b2c211cb415f68a7242b7>
 
 ## 功能特性
 
@@ -70,7 +70,7 @@ PYTHONPATH=src python -m job_application_agent_langchain.web.run
 uvicorn job_application_agent_langchain.web.app:app --host 0.0.0.0 --port 8000
 ```
 
-启动后，在浏览器打开 [http://localhost:8000](http://localhost:8000) 即可进入 Web UI。API 文档位于 [http://localhost:8000/docs](http://localhost:8000/docs)。
+启动后，在浏览器打开 <http://localhost:8000> 即可进入 Web UI。API 文档位于 <http://localhost:8000/docs>。
 
 ### 使用流程
 
@@ -165,7 +165,7 @@ src/job_application_agent_langchain/
 
 ### 实时任务进展
 
-检索到岗位和当前招聘批次可以投递的岗位数量（假设某公司秋招最多只能同时投递 n 个岗位）后，根据用户简历中的项目经历，寻找匹配的 2*n 个候选岗位，展示给用户，并附上推荐理由，让用户选择其中想投递的岗位进行投递。投递时会实时展示当前的任务进展。
+检索到岗位和当前招聘批次可以投递的岗位数量（假设某公司秋招最多只能同时投递 n 个岗位）后，根据用户简历中的项目经历，寻找匹配的 2\*n 个候选岗位，展示给用户，并附上推荐理由，让用户选择其中想投递的岗位进行投递。投递时会实时展示当前的任务进展。
 
 ![实时任务进展](docs/images/task-progress.png)
 
