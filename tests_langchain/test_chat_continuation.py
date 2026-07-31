@@ -63,3 +63,25 @@ def test_run_company_agent_accepts_message_history():
     from job_application_agent_langchain.agents.company_agent import run_company_agent
     sig = inspect.signature(run_company_agent)
     assert "message_history" in sig.parameters
+
+
+def test_cancel_session_stops_task_without_restart():
+    """停止会话应取消当前任务并保留 cancelled 状态。"""
+    from job_application_agent_langchain.web.emitter import WebEventEmitter
+    from job_application_agent_langchain.web.session_manager import SessionInfo
+
+    async def scenario():
+        mgr = SessionManager()
+        emitter = WebEventEmitter("cancel-test", mgr)
+        info = SessionInfo(session_id="cancel-test", emitter=emitter)
+        mgr.sessions[info.session_id] = info
+        info.status = "running"
+        info.task = asyncio.create_task(asyncio.sleep(60))
+
+        result = await mgr.cancel_session(info.session_id)
+        return info, result
+
+    info, result = asyncio.run(scenario())
+    assert result == {"status": "cancelled"}
+    assert info.status == "cancelled"
+    assert info.task.cancelled()

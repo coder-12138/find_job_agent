@@ -21,6 +21,20 @@ class NotificationState:
 _notify_state = NotificationState()
 
 
+def _safe_console_print(value: object = "") -> None:
+    """Never let a Windows console code page abort an application workflow."""
+
+    text = str(value)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        printable = text.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
+        print(printable)
+
+
 def _send_email(subject: str, body: str) -> bool:
     from job_application_agent_langchain.config import Settings
 
@@ -48,7 +62,7 @@ def _send_email(subject: str, body: str) -> bool:
         server.quit()
         return True
     except Exception as e:
-        print(f"[邮件通知] 发送失败: {e}")
+        _safe_console_print(f"[邮件通知] 发送失败: {e}")
         return False
 
 
@@ -77,15 +91,15 @@ def _terminal_print(title: str, message: str, level: str = "info"):
     }
     prefix = prefix_map.get(level, "ℹ️")
     separator = "=" * 60
-    print(f"\n{separator}")
-    print(f"{prefix} {title}")
-    print(f"{separator}")
-    print(message)
-    print(separator)
+    _safe_console_print(f"\n{separator}")
+    _safe_console_print(f"{prefix} {title}")
+    _safe_console_print(separator)
+    _safe_console_print(message)
+    _safe_console_print(separator)
 
 
 def _get_user_input(prompt: str) -> str:
-    print(f"\n🤖 {prompt}")
+    _safe_console_print(f"\n🤖 {prompt}")
     try:
         response = input("👉 请输入: ")
         return response.strip()

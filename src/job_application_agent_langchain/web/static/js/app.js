@@ -18,6 +18,7 @@ const PHASES = [
 const PHASE_INDEX = Object.fromEntries(PHASES.map((p, i) => [p.key, i]));
 
 const RECRUITMENT_TYPES = ["校招", "社招", "日常实习", "暑期实习（转正实习）"];
+const API_SETTINGS_STORAGE_KEY = "find-job-agent.api-settings.v1";
 
 /* 简历字段中文标签（resume_review） */
 const RESUME_LABELS = {
@@ -27,11 +28,38 @@ const RESUME_LABELS = {
     work_highlights: "工作亮点",
     summary: "总结",
 };
+const RESUME_ARRAY_FIELDS = {
+    project_highlights: [
+        ["name", "项目名称"],
+        ["role", "担任角色"],
+        ["description", "项目描述"],
+        ["relevance_to_jd", "与岗位的相关性"],
+    ],
+    skill_highlights: [
+        ["skill", "技能名称"],
+        ["level", "掌握程度"],
+        ["relevance", "与岗位的相关性"],
+    ],
+    work_highlights: [
+        ["company", "公司名称"],
+        ["position", "职位名称"],
+        ["description", "工作描述"],
+        ["relevance", "与岗位的相关性"],
+    ],
+};
 
 /* ---------------- 应用状态 ---------------- */
 const state = {
     currentView: "home",
     recruitmentTypes: RECRUITMENT_TYPES,
+    agentApi: {
+        verified: false,
+        autoVerifyAttempted: false,
+    },
+    profiles: {
+        items: [],
+        selectedVersionId: null,
+    },
     companies: [], // [{uid, company_name, recruitment_type, referral_code, job_keywords, preferred_cities, parallel}]
     session: {
         id: null,
@@ -158,8 +186,8 @@ async function api(path, options = {}) {
 /* ---------------- 导航 ---------------- */
 const VIEW_TITLES = {
     home: "投递任务",
-    document: "文档投递",
     files: "文件管理",
+    "agent-api": "Agent 连接",
     settings: "系统设置",
     monitor: "运行监控",
     memory: "记忆管理",
@@ -173,8 +201,12 @@ function switchView(view) {
     // 关闭移动端侧边栏
     $("#sidebar").classList.remove("open");
     // 视图打开时按需加载数据
-    if (view === "files") loadUploads();
-    if (view === "settings") { loadSettings(); loadApiSettings(); }
+    if (view === "files") {
+        loadUploads();
+        loadProfiles();
+    }
+    if (view === "agent-api") loadAgentApiSettings();
+    if (view === "settings") loadSettings();
     if (view === "memory") loadMemory();
 }
 
@@ -188,6 +220,7 @@ function createCompanyRow(data = {}) {
         referral_code: data.referral_code || "",
         job_keywords: data.job_keywords || "",
         preferred_cities: data.preferred_cities || [],
+        application_url: data.application_url || "",
     };
     state.companies.push(company);
 
@@ -270,6 +303,17 @@ function createCompanyRow(data = {}) {
                         .map((s) => s.trim())
                         .filter(Boolean);
                 },
+            }),
+        ]),
+        // 手动招聘链接
+        el("div", { class: "full" }, [
+            el("label", { class: "field-mini-label", text: "招聘官网 / 职位列表链接（可选，推荐）" }),
+            el("input", {
+                class: "input",
+                type: "url",
+                placeholder: "https://...  填写后将跳过搜索引擎，直接访问该页面",
+                value: company.application_url,
+                oninput: (e) => { company.application_url = e.target.value.trim(); },
             }),
         ]),
     ]);
@@ -382,11 +426,32 @@ async function startSession() {
             referral_code: c.referral_code.trim(),
             job_keywords: c.job_keywords.trim(),
             preferred_cities: c.preferred_cities,
+            application_url: c.application_url.trim(),
         }))
         .filter((c) => c.company_name);
 
     if (!companies.length) {
         toast("请至少添加一家公司（公司名称必填）", "warning", "无法开始");
+        return;
+    }
+    const invalidUrlCompany = companies.find(
+        (c) => c.application_url && !/^https?:\/\//i.test(c.application_url)
+    );
+    if (invalidUrlCompany) {
+        toast(
+            `${invalidUrlCompany.company_name} 的招聘链接必须以 http:// 或 https:// 开头`,
+            "warning",
+            "链接格式错误"
+        );
+        return;
+    }
+    if (!(await ensureAgentApiVerified())) return;
+    if (!state.profiles.selectedVersionId) {
+        await loadProfiles();
+    }
+    if (!state.profiles.selectedVersionId) {
+        toast("请先在文件管理中上传 PDF，并确认一个候选人档案版本", "warning", "缺少候选人档案");
+        switchView("files");
         return;
     }
 
@@ -399,7 +464,11 @@ async function startSession() {
     try {
         const res = await api("/api/sessions", {
             method: "POST",
-            json: { companies, parallel },
+            json: {
+                companies,
+                parallel,
+                profile_version_id: state.profiles.selectedVersionId,
+            },
         });
         state.session.id = res.session_id;
         state.session.companies = {};
@@ -449,6 +518,7 @@ async function startDocumentSession() {
         toast("请提供有效的腾讯文档链接（需包含 docs.qq.com）", "warning", "链接无效");
         return;
     }
+    if (!(await ensureAgentApiVerified())) return;
 
     const btn = $("#startDocBtn");
     btn.disabled = true;
@@ -541,6 +611,9 @@ async function uploadFiles(fileList) {
             fd.append("file_type", fileType);
             const res = await api("/api/upload", { method: "POST", body: fd });
             toast(`${res.filename} 已上传`, "success", "上传成功");
+            if (fileType === "resume" && res.resource_id && res.extraction) {
+                await reviewUploadedResume(res);
+            }
         } catch (e) {
             toast(`${file.name}：${e.message}`, "error", "上传失败");
         }
@@ -550,6 +623,7 @@ async function uploadFiles(fileList) {
     text.textContent = `完成 ${done}/${files.length}`;
     setTimeout(() => { progress.style.display = "none"; fill.style.width = "0%"; }, 1200);
     loadUploads();
+    loadProfiles();
 }
 
 async function loadUploads() {
@@ -584,36 +658,407 @@ async function loadUploads() {
 
 const FILE_ICON_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
-/* ---------------- 通知设置 ---------------- */
-async function loadApiSettings() {
+/* ---------------- 候选人档案（版本化、人工确认） ---------------- */
+const PROFILE_FIELD_LABELS = {
+    full_name: "姓名",
+    name: "姓名",
+    email: "邮箱",
+    phone: "手机号",
+    gender: "性别",
+    address: "地址",
+    education: "教育经历",
+    work_experience: "工作经历",
+    project_experience: "项目经历",
+    skills: "技能",
+    self_introduction: "自我介绍",
+};
+
+function extractionToFields(extraction) {
+    const fields = {};
+    (extraction.proposed_fields || extraction.fields || []).forEach((item) => {
+        if (item.field_key) fields[item.field_key] = item.value ?? "";
+    });
+    return fields;
+}
+
+async function loadProfiles() {
+    const container = $("#profileList");
+    if (!container) return;
+    container.innerHTML = '<div class="empty-state">加载中…</div>';
     try {
-        const s = await api("/api/settings/api");
-        $("#apiBaseUrl").value = s.api_base_url || "";
-        $("#apiKey").value = s.api_key || "";
-        $("#apiModel").value = s.model_name || "";
+        const profiles = await api("/api/v2/profiles");
+        state.profiles.items = profiles || [];
+        if (!profiles.length) {
+            state.profiles.selectedVersionId = null;
+            container.innerHTML = '<div class="empty-state">尚未建立候选人档案，请在下方上传 PDF 简历并确认提取内容</div>';
+            return;
+        }
+        const availableActiveIds = profiles.map((item) => item.active_version.id);
+        if (!availableActiveIds.includes(state.profiles.selectedVersionId)) {
+            state.profiles.selectedVersionId = profiles[0].active_version.id;
+        }
+        container.innerHTML = "";
+        for (const profile of profiles) {
+            const versions = await api(`/api/v2/profiles/${profile.id}/versions`);
+            const active = profile.active_version;
+            const title = active.fields.full_name || active.fields.name || `档案 ${profile.id.slice(0, 8)}`;
+            const versionNodes = versions.map((version) => {
+                const isActive = version.id === profile.active_version_id;
+                const actions = [];
+                if (!isActive && version.status !== "archived") {
+                    actions.push(el("button", {
+                        class: "btn btn-soft btn-sm",
+                        text: "切换到此版本",
+                        onclick: () => activateProfileVersion(profile, version),
+                    }));
+                }
+                if (!isActive) {
+                    actions.push(el("button", {
+                        class: "btn btn-ghost btn-sm",
+                        text: "删除",
+                        onclick: () => deleteProfileVersion(profile, version),
+                    }));
+                }
+                return el("div", { class: "file-item" }, [
+                    el("div", { class: "file-meta" }, [
+                        el("div", { class: "file-name", text: `版本 ${version.version_number}${isActive ? "（当前投递版本）" : ""}` }),
+                        el("div", { class: "file-sub", text: `${formatTime(version.created_at)} · ${version.status}` }),
+                    ]),
+                    ...actions,
+                ]);
+            });
+            container.appendChild(el("div", { style: "margin-bottom:18px" }, [
+                el("div", { style: "display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px" }, [
+                    el("div", {}, [
+                        el("div", { class: "file-name", text: title }),
+                        el("div", { class: "file-sub", text: `当前使用版本 ${active.version_number}；新投递将绑定该版本` }),
+                    ]),
+                    el("button", {
+                        class: "btn btn-soft btn-sm",
+                        text: "编辑并新建版本",
+                        onclick: () => editProfileVersion(profile),
+                    }),
+                ]),
+                ...versionNodes,
+            ]));
+        }
     } catch (e) {
-        toast(e.message, "error", "加载 API 配置失败");
+        container.innerHTML = `<div class="empty-state">档案加载失败：${escapeHtml(e.message)}</div>`;
     }
 }
 
-async function saveApiSettings() {
+function profileEditor(fields, { selectable = false } = {}) {
+    const root = el("div", { style: "display:grid;gap:12px" });
+    const keys = Object.keys(fields).filter((key) => !["resume_text", "raw_resume_text"].includes(key));
+    if (!keys.length) keys.push("full_name", "email", "phone");
+    keys.forEach((key) => {
+        const value = fields[key] ?? "";
+        const input = el("textarea", {
+            class: "input profile-field-input",
+            rows: String(value).length > 80 ? "5" : "2",
+            "data-profile-key": key,
+        });
+        input.value = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        const labelChildren = [];
+        if (selectable) {
+            const checkbox = el("input", { type: "checkbox", checked: "checked", "data-profile-select": key });
+            checkbox.checked = true;
+            labelChildren.push(checkbox);
+        }
+        labelChildren.push(document.createTextNode(` ${PROFILE_FIELD_LABELS[key] || key}`));
+        root.appendChild(el("label", { style: "display:grid;gap:6px" }, [
+            el("span", { class: "field-label" }, labelChildren),
+            input,
+        ]));
+    });
+    return root;
+}
+
+function readProfileEditor(root) {
+    const fields = {};
+    $$("[data-profile-key]", root).forEach((input) => {
+        const key = input.dataset.profileKey;
+        const raw = input.value.trim();
+        if (/^[\[{]/.test(raw)) {
+            try { fields[key] = JSON.parse(raw); return; } catch { /* keep text */ }
+        }
+        fields[key] = raw;
+    });
+    return fields;
+}
+
+async function reviewUploadedResume(upload) {
+    const extracted = extractionToFields(upload.extraction);
+    const profiles = await api("/api/v2/profiles");
+    const profile = profiles[0] || null;
+    const editor = profileEditor(extracted, { selectable: !!profile });
+    const quality = upload.extraction.quality || {};
+    const body = el("div", {}, [
+        el("div", { class: "confirm-msg", text: profile
+            ? "请选择这次 PDF 要增量更新的字段。确认后会建立独立版本，旧版本不会被覆盖。"
+            : "请核对 PDF 提取内容。确认后才会建立第一个候选人档案版本。" }),
+        el("div", { class: "file-sub", text: `页数 ${quality.page_count || 0} · 字符 ${quality.character_count || 0}${quality.needs_review ? " · 建议重点复核" : ""}` }),
+        editor,
+    ]);
+    const confirm = el("button", { class: "btn btn-primary", text: profile ? "确认所选字段并新建版本" : "确认并建立档案" });
+    confirm.addEventListener("click", async () => {
+        confirm.disabled = true;
+        try {
+            const edited = readProfileEditor(editor);
+            if (!profile) {
+                await api("/api/v2/profiles", {
+                    method: "POST",
+                    json: { fields: edited, source_file_resource_id: upload.resource_id },
+                });
+            } else {
+                const proposal = await api(`/api/v2/profiles/${profile.id}/change-proposals`, {
+                    method: "POST",
+                    json: {
+                        base_version_id: profile.active_version_id,
+                        source_file_resource_id: upload.resource_id,
+                        proposed_fields: edited,
+                    },
+                });
+                const selected = $$('[data-profile-select]:checked', editor).map((node) => node.dataset.profileSelect);
+                await api(`/api/v2/change-proposals/${proposal.id}/accept`, {
+                    method: "POST",
+                    json: { selected_fields: Array.from(new Set(selected)), expected_version: profile.row_version },
+                });
+            }
+            closeModal();
+            toast("候选人档案版本已确认", "success", "档案已更新");
+            await loadProfiles();
+            loadUserInfoSummary();
+        } catch (e) {
+            toast(e.message, "error", "档案保存失败");
+            confirm.disabled = false;
+        }
+    });
+    openModal("核对 PDF 提取结果", body, el("div", { class: "confirm-options" }, [
+        el("button", { class: "btn btn-ghost", text: "暂不建立", onclick: closeModal }),
+        confirm,
+    ]));
+}
+
+function editProfileVersion(profile) {
+    const editor = profileEditor(profile.active_version.fields);
+    const save = el("button", { class: "btn btn-primary", text: "保存为新版本" });
+    save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+            const fields = readProfileEditor(editor);
+            await api(`/api/v2/profiles/${profile.id}/versions`, {
+                method: "POST",
+                json: {
+                    fields,
+                    source_file_resource_id: profile.active_version.source_file_resource_id,
+                    expected_version: profile.row_version,
+                },
+            });
+            closeModal();
+            toast("修改已保存为独立版本", "success");
+            loadProfiles();
+        } catch (e) {
+            toast(e.message, "error", "保存失败");
+            save.disabled = false;
+        }
+    });
+    openModal("编辑候选人档案", editor, save);
+}
+
+async function activateProfileVersion(profile, version) {
+    try {
+        await api(`/api/v2/profiles/${profile.id}/versions/${version.id}/activate`, {
+            method: "POST",
+            json: { expected_version: profile.row_version },
+        });
+        state.profiles.selectedVersionId = version.id;
+        toast(`已切换到版本 ${version.version_number}`, "success");
+        loadProfiles();
+        loadUserInfoSummary();
+    } catch (e) { toast(e.message, "error", "切换失败"); }
+}
+
+async function deleteProfileVersion(profile, version) {
+    if (!confirm(`确定删除版本 ${version.version_number}？该操作不可撤销。`)) return;
+    try {
+        await api(`/api/v2/profiles/${profile.id}/versions/${version.id}?expected_version=${profile.row_version}`, { method: "DELETE" });
+        toast(`版本 ${version.version_number} 已删除`, "success");
+        loadProfiles();
+    } catch (e) { toast(e.message, "error", "删除失败"); }
+}
+
+/* ---------------- Agent 临时连接 ---------------- */
+function loadSavedAgentApiSettings() {
+    try {
+        const raw = localStorage.getItem(API_SETTINGS_STORAGE_KEY);
+        if (!raw) return null;
+        const saved = JSON.parse(raw);
+        if (!saved.api_base_url || !saved.api_key || !saved.model_name) return null;
+        return saved;
+    } catch {
+        return null;
+    }
+}
+
+function saveAgentApiSettingsToBrowser(payload) {
+    try {
+        localStorage.setItem(API_SETTINGS_STORAGE_KEY, JSON.stringify(payload));
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function forgetSavedAgentApiSettings() {
+    localStorage.removeItem(API_SETTINGS_STORAGE_KEY);
+}
+
+function renderAgentApiStatus(status, mode = "") {
+    const box = $("#apiConnectionStatus");
+    const verified = !!status.verified;
+    state.agentApi.verified = verified;
+    box.className = `api-connection-status ${mode || (verified ? "verified" : "idle")}`;
+
+    if (mode === "testing") {
+        $("#apiStatusTitle").textContent = "正在验证 Agent 连接…";
+        $("#apiStatusDetail").textContent = "正在向所选模型发送一个最小测试请求。";
+    } else if (mode === "error") {
+        $("#apiStatusTitle").textContent = "连接验证失败";
+        $("#apiStatusDetail").textContent = status.message || "请检查接口地址、密钥和模型名称。";
+    } else if (verified) {
+        $("#apiStatusTitle").textContent = "Agent 连接已验证";
+        $("#apiStatusDetail").textContent =
+            `${status.model_name || "模型"} · ${status.api_base_url || ""}` +
+            (status.verified_at ? ` · ${formatTime(status.verified_at)}` : "") +
+            ($("#rememberApiSettings").checked
+                ? "。已保存在此浏览器，服务重启后会自动重新验证。"
+                : "。配置仅在本次服务运行期间有效。");
+    } else if (status.last_error) {
+        box.className = "api-connection-status error";
+        $("#apiStatusTitle").textContent = "上次连接验证失败";
+        $("#apiStatusDetail").textContent = status.last_error;
+    } else {
+        $("#apiStatusTitle").textContent = "尚未验证连接";
+        $("#apiStatusDetail").textContent = "请输入接口地址、模型和密钥，然后点击“验证并启用”。";
+    }
+
+    const badge = $("#agentApiBadge");
+    badge.style.display = verified ? "none" : "";
+}
+
+async function loadAgentApiSettings() {
+    try {
+        const s = await api("/api/settings/api");
+        const saved = loadSavedAgentApiSettings();
+        if (saved) {
+            $("#apiBaseUrl").value = saved.api_base_url;
+            $("#apiModel").value = saved.model_name;
+            $("#apiKey").value = s.verified ? "" : saved.api_key;
+            $("#rememberApiSettings").checked = true;
+        } else {
+            $("#apiBaseUrl").value = s.api_base_url || "";
+            $("#apiModel").value = s.model_name || "";
+            $("#apiKey").value = "";
+            $("#rememberApiSettings").checked = false;
+        }
+        renderAgentApiStatus(s);
+        if (
+            !s.verified &&
+            saved &&
+            !state.agentApi.autoVerifyAttempted
+        ) {
+            state.agentApi.autoVerifyAttempted = true;
+            await verifyAgentApiSettings({ automatic: true });
+        }
+    } catch (e) {
+        renderAgentApiStatus({ verified: false, message: e.message }, "error");
+        toast(e.message, "error", "加载 Agent 连接状态失败");
+    }
+}
+
+async function verifyAgentApiSettings({ automatic = false } = {}) {
     const payload = {
         api_base_url: $("#apiBaseUrl").value.trim(),
         api_key: $("#apiKey").value.trim(),
         model_name: $("#apiModel").value.trim(),
     };
-    const btn = $("#saveApiSettingsBtn");
+    if (!payload.api_base_url || !payload.api_key || !payload.model_name) {
+        toast("接口地址、API 密钥和模型名称均不能为空", "warning", "无法验证");
+        return;
+    }
+
+    const btn = $("#verifyApiSettingsBtn");
     btn.disabled = true;
+    renderAgentApiStatus({ verified: false }, "testing");
     try {
-        await api("/api/settings/api", { method: "PUT", json: payload });
-        toast("API 配置已保存", "success");
+        const result = await api("/api/settings/api/verify", {
+            method: "POST",
+            json: payload,
+        });
+        if ($("#rememberApiSettings").checked) {
+            if (!saveAgentApiSettingsToBrowser(payload)) {
+                $("#rememberApiSettings").checked = false;
+                toast(
+                    "浏览器拒绝写入本地存储；Agent 已连接，但配置未保存",
+                    "warning",
+                    "未能保存"
+                );
+            }
+        } else {
+            forgetSavedAgentApiSettings();
+        }
+        $("#apiKey").value = "";
+        renderAgentApiStatus({
+            verified: true,
+            api_base_url: result.api_base_url,
+            model_name: result.model_name,
+            verified_at: result.verified_at,
+        });
+        toast(
+            automatic ? "已使用浏览器中保存的配置自动连接 Agent" : result.message,
+            "success",
+            "连接成功"
+        );
     } catch (e) {
-        toast(e.message, "error", "保存失败");
+        renderAgentApiStatus({ verified: false, message: e.message }, "error");
+        toast(e.message, "error", "连接失败");
     } finally {
         btn.disabled = false;
     }
 }
 
+async function clearAgentApiSettings() {
+    try {
+        const status = await api("/api/settings/api", { method: "DELETE" });
+        forgetSavedAgentApiSettings();
+        state.agentApi.autoVerifyAttempted = false;
+        $("#apiKey").value = "";
+        $("#rememberApiSettings").checked = false;
+        $("#apiBaseUrl").value = status.api_base_url || "https://api.openai.com/v1";
+        $("#apiModel").value = status.model_name || "gpt-4o";
+        renderAgentApiStatus(status);
+        toast("Agent API 配置已从服务内存和当前浏览器中清除", "success");
+    } catch (e) {
+        toast(e.message, "error", "清除失败");
+    }
+}
+
+async function ensureAgentApiVerified() {
+    try {
+        const status = await api("/api/settings/api");
+        renderAgentApiStatus(status);
+        if (status.verified) return true;
+    } catch (e) {
+        toast(e.message, "error", "无法检查 Agent 连接");
+        return false;
+    }
+    switchView("agent-api");
+    toast("请先输入 API 配置并验证 Agent 连接", "warning", "尚未连接");
+    return false;
+}
+
+/* ---------------- 通知设置 ---------------- */
 async function loadSettings() {
     try {
         const s = await api("/api/settings/notifications");
@@ -730,6 +1175,10 @@ function setConnStatus(state_) {
     }
 }
 
+function isTerminalSessionStatus(status) {
+    return ["completed", "error", "cancelled"].includes(status);
+}
+
 function connectWebSocket(sessionId) {
     setConnStatus("connecting");
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -755,8 +1204,8 @@ function connectWebSocket(sessionId) {
         handleWsMessage(msg);
     };
     ws.onclose = () => {
-        setConnStatus(state.session.status === "completed" ? "connected" : "error");
-        if (state.session.status !== "completed" && state.session.status !== "error") {
+        setConnStatus(isTerminalSessionStatus(state.session.status) ? "connected" : "error");
+        if (!isTerminalSessionStatus(state.session.status)) {
             addLog("warning", "WebSocket 已断开，尝试重连…");
             scheduleReconnect(sessionId);
         } else {
@@ -772,7 +1221,7 @@ function scheduleReconnect(sessionId) {
     if (state.session.wsReconnectTimer) return;
     state.session.wsReconnectTimer = setTimeout(() => {
         state.session.wsReconnectTimer = null;
-        if (state.session.status === "completed" || state.session.status === "error") return;
+        if (isTerminalSessionStatus(state.session.status)) return;
         connectWebSocket(sessionId);
     }, 2500);
 }
@@ -821,9 +1270,19 @@ function handleWsMessage(msg) {
         case "session_complete":
             handleSessionComplete(msg);
             break;
+        case "session_cancelled":
+            handleSessionCancelled(msg);
+            break;
         case "error":
             addLog("error", msg.message || "未知错误");
             toast(msg.message || "错误", "error", "Agent 错误");
+            if (msg.message === "会话不存在") {
+                updateSessionStatus("error");
+                if (state.session.wsReconnectTimer) {
+                    clearTimeout(state.session.wsReconnectTimer);
+                    state.session.wsReconnectTimer = null;
+                }
+            }
             break;
         case "agent_message":
             state.chat.messages.push({
@@ -849,6 +1308,9 @@ function handleProgress(msg) {
     const phase = msg.phase;
     const company = msg.company || "";
     const message = msg.message || "";
+    if (state.session.status !== "running") {
+        updateSessionStatus("running");
+    }
 
     // 全局阶段更新
     if (phase && PHASE_INDEX[phase] !== undefined) {
@@ -912,23 +1374,50 @@ function handleResult(msg) {
         state.session.companies[company].status = r.submitted ? "completed" : "error";
         state.session.companies[company].submitted = !!r.submitted;
         state.session.companies[company].form_filled = !!r.form_filled;
-        if (r.error_message) state.session.companies[company].error = r.error_message;
+        if (r.error || r.error_message) {
+            state.session.companies[company].error = r.error || r.error_message;
+        }
     }
     addLog("success", `[${company}] 投递结果：${JSON.stringify(msg.result || {})}`);
     renderCompanyCards();
 }
 
 function handleSessionComplete(msg) {
-    state.session.status = "completed";
     state.session.results = msg.results || {};
-    updateSessionStatus("completed");
-    addLog("success", "会话已完成");
-    toast("投递会话已完成", "success", "完成");
+    const companyResults = Object.values(state.session.results).filter((item) => item && typeof item === "object");
+    const failed = companyResults.filter((item) => item.status === "error");
+    Object.entries(state.session.results).forEach(([company, result]) => {
+        if (!state.session.companies[company] || !result || typeof result !== "object") return;
+        const target = state.session.companies[company];
+        target.status = result.status === "error" ? "error" : (result.submitted ? "completed" : result.status || "completed");
+        target.form_filled = !!result.form_filled;
+        target.submitted = !!result.submitted;
+        target.error = result.error || "";
+    });
+    if (failed.length) {
+        state.session.status = "error";
+        updateSessionStatus("error");
+        addLog("error", `会话结束，但有 ${failed.length} 家公司执行失败`);
+        toast(failed[0].error || "公司流程执行失败", "error", "会话失败");
+    } else {
+        state.session.status = "completed";
+        updateSessionStatus("completed");
+        addLog("success", "会话已完成");
+        toast("投递会话已完成", "success", "完成");
+    }
 
     const card = $("#resultCard");
     card.style.display = "block";
     $("#resultPre").textContent = JSON.stringify(msg.results, null, 2);
     renderCompanyCards();
+}
+
+function handleSessionCancelled(msg) {
+    if (state.session.status === "cancelled") return;
+    state.session.status = "cancelled";
+    updateSessionStatus("cancelled");
+    addLog("warning", msg.message || "任务已停止");
+    toast(msg.message || "任务已停止", "warning", "已中断");
 }
 
 /* ---------------- 监控视图渲染 ---------------- */
@@ -962,13 +1451,18 @@ function updateSessionStatus(status) {
         completed: { text: "已完成", cls: "status-completed" },
         error: { text: "出错", cls: "status-error" },
         disconnected: { text: "已断开", cls: "status-disconnected" },
+        cancelled: { text: "已停止", cls: "status-disconnected" },
     };
     const m = map[status] || map.pending;
     $("#sessionStatus").innerHTML = `<span class="status-badge ${m.cls}">${m.text}</span>`;
-    // 中断按钮：仅运行中显示
+    // 中断/停止按钮：搜索阶段进入 running 后立即显示
     const interruptBtn = $("#interruptBtn");
     if (interruptBtn) {
         interruptBtn.style.display = status === "running" ? "inline-flex" : "none";
+    }
+    const stopBtn = $("#stopSessionBtn");
+    if (stopBtn) {
+        stopBtn.style.display = ["pending", "running"].includes(status) ? "inline-flex" : "none";
     }
 }
 
@@ -1127,6 +1621,32 @@ function interruptAgent(text) {
     addLog("warning", `[对话] 用户中断并重试：${text}`);
 }
 
+async function stopCurrentSession() {
+    if (!state.session.id) {
+        toast("当前没有可停止的任务", "warning");
+        return;
+    }
+    if (!confirm("确定立即停止当前任务吗？停止后不会自动重启。")) return;
+
+    const btn = $("#stopSessionBtn");
+    btn.disabled = true;
+    try {
+        const result = await api(`/api/sessions/${state.session.id}/cancel`, {
+            method: "POST",
+        });
+        handleSessionCancelled({ message: "任务已由用户停止" });
+        if (state.session.ws) {
+            state.session.ws.close();
+            state.session.ws = null;
+        }
+        addLog("warning", `停止结果：${result.status || "cancelled"}`);
+    } catch (e) {
+        toast(e.message, "error", "停止失败");
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 /* ---------------- HITL 请求处理 ---------------- */
 function handleRequest(msg) {
     const reqType = msg.request_type;
@@ -1254,52 +1774,122 @@ function showMissingFields(msg) {
 function showResumeReview(msg) {
     const original = msg.original || {};
     const polished = msg.polished || {};
-    const editable = {}; // 可编辑副本
+    const sourceResumeText = String(original.source_resume_text || "").trim();
+    const sourceResumeFile = String(original.source_resume_file || "").trim();
+    const editable = JSON.parse(JSON.stringify(polished));
 
     const body = el("div", {}, [
         el("p", {
             style: "margin: 0 0 12px; font-size: 13px; color: var(--gray-600);",
-            text: "对比原始与润色后的简历内容。可在右侧编辑后提交，或直接采用润色版本。",
+            text: sourceResumeText
+                ? "左侧是上传简历的原始文本，也是本次润色的唯一简历依据；右侧可编辑后提交。"
+                : "对比原始与润色后的简历内容。可在右侧编辑后提交，或直接采用润色版本。",
         }),
     ]);
 
     const compare = el("div", { class: "resume-compare" });
 
     // 原始列
-    const origCol = el("div", { class: "resume-col" }, [el("h4", { text: "原始内容" })]);
+    const origCol = el("div", { class: "resume-col" }, [
+        el("h4", { text: sourceResumeText ? "原始内容（上传简历）" : "原始内容" }),
+    ]);
     // 润色列
     const polCol = el("div", { class: "resume-col polished" }, [el("h4", { text: "润色内容（可编辑）" })]);
+
+    if (sourceResumeText) {
+        origCol.appendChild(
+            el("div", { class: "resume-source-card" }, [
+                el("div", {
+                    class: "resume-section-label",
+                    text: sourceResumeFile
+                        ? `上传简历原文 · ${sourceResumeFile}`
+                        : "上传简历原文",
+                }),
+                el("div", {
+                    class: "resume-source-text",
+                    text: sourceResumeText,
+                }),
+            ])
+        );
+    }
 
     Object.keys(RESUME_LABELS).forEach((key) => {
         const origVal = original[key];
         const polVal = polished[key];
 
         // 原始
-        origCol.appendChild(
-            el("div", { class: "resume-section" }, [
-                el("div", { class: "resume-section-label", text: RESUME_LABELS[key] }),
-                el("div", {
-                    class: "resume-section-value",
-                    text: formatResumeValue(origVal) || "—",
-                }),
-            ])
-        );
+        if (!sourceResumeText) {
+            origCol.appendChild(
+                el("div", { class: "resume-section" }, [
+                    el("div", { class: "resume-section-label", text: RESUME_LABELS[key] }),
+                    el("div", {
+                        class: "resume-section-value",
+                        text: formatResumeValue(origVal) || "—",
+                    }),
+                ])
+            );
+        }
 
-        // 润色（可编辑）
-        const textVal = formatResumeValue(polVal);
-        editable[key] = textVal;
-        const textarea = el("textarea", {
-            rows: key === "self_introduction" || key === "summary" ? 4 : 5,
-        });
-        textarea.value = textVal;
-        textarea.addEventListener("input", () => { editable[key] = textarea.value; });
-
-        polCol.appendChild(
-            el("div", { class: "resume-section" }, [
-                el("div", { class: "resume-section-label", text: RESUME_LABELS[key] }),
-                textarea,
-            ])
-        );
+        const section = el("div", { class: "resume-section" }, [
+            el("div", { class: "resume-section-label", text: RESUME_LABELS[key] }),
+        ]);
+        if (Array.isArray(polVal)) {
+            editable[key] = editable[key] || [];
+            const list = el("div", { style: "display:grid;gap:10px" });
+            const renderItems = () => {
+                list.innerHTML = "";
+                const items = editable[key];
+                if (!items.length) {
+                    list.appendChild(el("div", { class: "file-sub", text: "没有从原始简历中确认到这一类经历" }));
+                }
+                items.forEach((item, index) => {
+                    const fields = RESUME_ARRAY_FIELDS[key] || [];
+                    const card = el("div", { style: "border:1px solid var(--gray-200);border-radius:10px;padding:10px;display:grid;gap:8px;background:#fff" }, [
+                        el("div", { style: "display:flex;justify-content:space-between;align-items:center" }, [
+                            el("strong", { text: `${RESUME_LABELS[key]} ${index + 1}` }),
+                            el("button", {
+                                class: "btn btn-ghost btn-sm",
+                                text: "删除此项",
+                                onclick: () => { items.splice(index, 1); renderItems(); },
+                            }),
+                        ]),
+                    ]);
+                    fields.forEach(([field, label]) => {
+                        const longField = ["description", "relevance", "relevance_to_jd"].includes(field);
+                        const input = el(longField ? "textarea" : "input", {
+                            class: longField ? "" : "input",
+                            rows: longField ? "3" : null,
+                            placeholder: label,
+                        });
+                        input.value = item[field] || "";
+                        input.addEventListener("input", () => { item[field] = input.value; });
+                        card.appendChild(el("label", { style: "display:grid;gap:4px" }, [
+                            el("span", { class: "file-sub", text: label }),
+                            input,
+                        ]));
+                    });
+                    list.appendChild(card);
+                });
+                const add = el("button", { class: "btn btn-soft btn-sm", text: "添加一项" });
+                add.addEventListener("click", () => {
+                    const empty = {};
+                    (RESUME_ARRAY_FIELDS[key] || []).forEach(([field]) => { empty[field] = ""; });
+                    editable[key].push(empty);
+                    renderItems();
+                });
+                list.appendChild(add);
+            };
+            renderItems();
+            section.appendChild(list);
+        } else {
+            const textarea = el("textarea", {
+                rows: key === "self_introduction" || key === "summary" ? 4 : 5,
+            });
+            textarea.value = polVal || "";
+            textarea.addEventListener("input", () => { editable[key] = textarea.value; });
+            section.appendChild(textarea);
+        }
+        polCol.appendChild(section);
     });
 
     compare.appendChild(origCol);
@@ -1316,22 +1906,7 @@ function showResumeReview(msg) {
             class: "btn btn-primary",
             text: "提交编辑后内容",
             onclick: () => {
-                // 将可编辑文本解析回结构
-                const confirmed = {};
-                Object.keys(editable).forEach((k) => {
-                    const originalPolVal = polished[k];
-                    if (Array.isArray(originalPolVal)) {
-                        // 尝试按行解析为数组（每行一项 JSON 或纯文本）
-                        const lines = editable[k].split("\n").map((s) => s.trim()).filter(Boolean);
-                        confirmed[k] = lines.map((line) => {
-                            try { return JSON.parse(line); }
-                            catch { return { value: line }; }
-                        });
-                    } else {
-                        confirmed[k] = editable[k];
-                    }
-                });
-                respond(msg.request_id, "resume_review", { confirmed });
+                respond(msg.request_id, "resume_review", { confirmed: editable });
             },
         }),
         el("button", { class: "btn btn-ghost", text: "取消", onclick: closeModal }),
@@ -1432,6 +2007,8 @@ function showPositionSelection(msg) {
 function showLoginRequestPanel(msg) {
     const loginUrl = msg.login_url || "";
     const message = msg.message || "";
+    const isFormRecovery = ["application_form", "application_form_wait"].includes(msg.mode);
+    const isCurrentPageWait = msg.mode === "application_form_wait";
 
     const body = el("div", {}, [
         el("div", {
@@ -1440,7 +2017,7 @@ function showLoginRequestPanel(msg) {
             text: message,
         }),
         el("div", { class: "login-url-row" }, [
-            el("label", { class: "field-label", text: "登录页地址" }),
+            el("label", { class: "field-label", text: "受管窗口当前目标" }),
             el("div", { class: "login-url-box" }, [
                 el("input", {
                     class: "input login-url-input",
@@ -1448,50 +2025,32 @@ function showLoginRequestPanel(msg) {
                     value: loginUrl,
                     readonly: "true",
                 }),
-                el("button", {
-                    class: "btn btn-soft btn-sm",
-                    text: "复制",
-                    onclick: () => {
-                        const inp = body.querySelector(".login-url-input");
-                        if (!inp) return;
-                        inp.select();
-                        try {
-                            navigator.clipboard.writeText(inp.value);
-                            toast("已复制登录页地址", "success");
-                        } catch (e) {
-                            try { document.execCommand("copy"); toast("已复制登录页地址", "success"); }
-                            catch { toast("复制失败，请手动选择复制", "warning"); }
-                        }
-                    },
-                }),
-                loginUrl ? el("a", {
-                    class: "btn btn-ghost btn-sm",
-                    href: loginUrl,
-                    target: "_blank",
-                    rel: "noopener noreferrer",
-                    text: "在新窗口打开",
-                }) : null,
             ]),
         ]),
         el("p", {
             style: "margin: 12px 0 0; font-size: 12px; color: var(--gray-500);",
-            text: "请在弹出的浏览器窗口中完成登录/注册，完成后点击下方「已完成登录」按钮。",
+            text: isFormRecovery
+                ? (isCurrentPageWait
+                    ? "浏览器与任务正在保持运行。这里只检测当前受管窗口，不会返回岗位列表或再次点击申请。"
+                    : "浏览器与任务正在保持运行。可先在同一受管窗口中手动调整页面，再回来重新检测。")
+                : "只操作此前自动弹出并执行岗位搜索的同一个受管窗口。确认后系统会自动返回所选岗位、点击申请入口并验证表单。",
         }),
     ]);
 
     const footer = el("div", {}, [
         el("button", {
-            class: "btn btn-ghost",
-            text: "重新检测",
-            onclick: () => respond(msg.request_id, "user_login", { status: "retry" }),
-        }),
-        el("button", {
             class: "btn btn-primary",
-            text: "已完成登录",
-            onclick: () => respond(msg.request_id, "user_login", { status: "logged_in" }),
+            text: isFormRecovery
+                ? (isCurrentPageWait
+                    ? "检测当前窗口的申请表单"
+                    : "重新恢复岗位并检测申请表单")
+                : "我已在受管窗口完成登录，继续打开申请表单",
+            onclick: () => respond(msg.request_id, "user_login", {
+                status: isFormRecovery ? "ready_for_form_check" : "logged_in",
+            }),
         }),
     ]);
-    openModal("🔐 需要登录", body, footer);
+    openModal(isFormRecovery ? "🧭 等待进入申请表单" : "🔐 需要登录", body, footer);
 }
 
 /* ---------------- 健康检查 ---------------- */
@@ -1538,13 +2097,14 @@ function init() {
     // 文件管理
     setupDropzone();
     $("#refreshFilesBtn").addEventListener("click", loadUploads);
+    $("#refreshProfilesBtn").addEventListener("click", loadProfiles);
 
     // 通知设置
     $("#saveSettingsBtn").addEventListener("click", saveSettings);
     $("#resetSettingsBtn").addEventListener("click", loadSettings);
-    // API 配置
-    $("#saveApiSettingsBtn").addEventListener("click", saveApiSettings);
-    $("#resetApiSettingsBtn").addEventListener("click", loadApiSettings);
+    // Agent 临时连接
+    $("#verifyApiSettingsBtn").addEventListener("click", () => verifyAgentApiSettings());
+    $("#clearApiSettingsBtn").addEventListener("click", clearAgentApiSettings);
 
     // 监控
     $("#clearLogBtn").addEventListener("click", () => {
@@ -1572,6 +2132,7 @@ function init() {
             interruptAgent(text.trim());
         }
     });
+    $("#stopSessionBtn").addEventListener("click", stopCurrentSession);
 
     // 记忆
     $("#refreshMemoryBtn").addEventListener("click", loadMemory);
@@ -1595,6 +2156,8 @@ function init() {
     // 并行加载初始数据
     loadRecruitmentTypes();
     loadUserInfoSummary();
+    loadProfiles();
+    loadAgentApiSettings();
     // 设置在切到该视图时再加载
 
     // 旋转动画样式（追加）

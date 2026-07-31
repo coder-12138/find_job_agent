@@ -56,6 +56,20 @@ class Settings:
 
         self.browser_headless = os.getenv("BROWSER_HEADLESS", "false").lower() == "true"
         self.browser_timeout = int(os.getenv("BROWSER_TIMEOUT", "30000"))
+        self.browser_interaction_timeout = int(
+            os.getenv("BROWSER_INTERACTION_TIMEOUT", "4000")
+        )
+        self.page_settle_timeout = int(os.getenv("PAGE_SETTLE_TIMEOUT", "6000"))
+        self.search_total_timeout = int(os.getenv("SEARCH_TOTAL_TIMEOUT", "75"))
+        self.search_phase_timeout = int(os.getenv("SEARCH_PHASE_TIMEOUT", "150"))
+        self.llm_request_timeout = int(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
+        self.llm_max_retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
+        self.polish_stage_timeout = int(os.getenv("POLISH_STAGE_TIMEOUT", "45"))
+        self.polish_generation_timeout = int(
+            os.getenv("POLISH_GENERATION_TIMEOUT", "100")
+        )
+        self.polish_total_timeout = int(os.getenv("POLISH_TOTAL_TIMEOUT", "160"))
+        self.agent_recursion_limit = int(os.getenv("AGENT_RECURSION_LIMIT", "60"))
 
         self.has_desktop = self._detect_desktop()
 

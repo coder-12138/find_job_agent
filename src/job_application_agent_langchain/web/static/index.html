@@ -31,17 +31,18 @@
                     </span>
                     <span class="nav-label">投递任务</span>
                 </a>
-                <a href="#" class="nav-item" data-view="document">
-                    <span class="nav-icon">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
-                    </span>
-                    <span class="nav-label">文档投递</span>
-                </a>
                 <a href="#" class="nav-item" data-view="files">
                     <span class="nav-icon">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
                     </span>
                     <span class="nav-label">文件管理</span>
+                </a>
+                <a href="#" class="nav-item" data-view="agent-api">
+                    <span class="nav-icon">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
+                    </span>
+                    <span class="nav-label">Agent 连接</span>
+                    <span class="nav-badge" id="agentApiBadge">!</span>
                 </a>
                 <a href="#" class="nav-item" data-view="settings">
                     <span class="nav-icon">
@@ -231,6 +232,19 @@
                 <section class="view" id="view-files">
                     <div class="card">
                         <div class="card-header">
+                            <div>
+                                <h2 class="card-title">候选人档案</h2>
+                                <p class="card-desc">投递只读取这里已确认并选中的版本。更新 PDF 会先生成差异供你选择，不会覆盖旧版本。</p>
+                            </div>
+                            <button class="btn btn-soft btn-sm" id="refreshProfilesBtn">刷新档案</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="profileList"><div class="empty-state">尚未建立候选人档案，请在下方上传 PDF 简历</div></div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
                             <h2 class="card-title">上传文件</h2>
                             <p class="card-desc">将简历、学位证、成绩单等文件拖拽到下方区域，或点击选择文件。</p>
                         </div>
@@ -249,7 +263,7 @@
                                 <div class="dropzone-inner">
                                     <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                                     <div class="dropzone-text">拖拽文件到此处，或<span class="link">点击选择</span></div>
-                                    <div class="dropzone-hint" id="dropzoneHint">支持 PDF、DOCX、图片等任意格式</div>
+                                    <div class="dropzone-hint" id="dropzoneHint">简历仅支持 PDF；其他材料保留原有格式支持</div>
                                 </div>
                                 <input type="file" id="fileInput" multiple style="display:none;">
                             </div>
@@ -277,15 +291,22 @@
                     </div>
                 </section>
 
-                <!-- ============== 视图 3：通知设置 ============== -->
-                <section class="view" id="view-settings">
-                    <!-- API 配置卡片 -->
+                <!-- ============== Agent 临时连接设置 ============== -->
+                <section class="view" id="view-agent-api">
                     <div class="card">
                         <div class="card-header">
-                            <h2 class="card-title">Agent API 配置</h2>
-                            <p class="card-desc">配置 Agent 使用的 LLM 接口地址、密钥和模型名称。保存后立即生效，无需重启。</p>
+                            <h2 class="card-title">Agent 连接</h2>
+                            <p class="card-desc">默认只在当前服务内存中使用。也可以选择保存在当前浏览器中，服务重启后会自动重新验证；项目目录和 .env 不会写入密钥。</p>
                         </div>
                         <div class="card-body">
+                            <div class="api-connection-status idle" id="apiConnectionStatus">
+                                <span class="api-status-dot"></span>
+                                <div>
+                                    <div class="api-status-title" id="apiStatusTitle">尚未验证连接</div>
+                                    <div class="api-status-detail" id="apiStatusDetail">请输入接口地址、模型和密钥，然后点击“验证并启用”。</div>
+                                </div>
+                            </div>
+
                             <div class="grid grid-2">
                                 <div class="form-group">
                                     <label class="field-label" for="apiBaseUrl">API 接口地址</label>
@@ -297,20 +318,32 @@
                                 </div>
                                 <div class="form-group full">
                                     <label class="field-label" for="apiKey">API 密钥</label>
-                                    <input type="password" class="input" id="apiKey" placeholder="sk-...">
+                                    <input type="password" class="input" id="apiKey" placeholder="sk-..." autocomplete="off">
+                                    <div class="field-help">密钥不会由后端接口回显，也不会写入项目文件。</div>
                                 </div>
                             </div>
 
+                            <label class="remember-api-row">
+                                <input type="checkbox" id="rememberApiSettings">
+                                <span>
+                                    <strong>保存在此浏览器</strong>
+                                    <small>仅建议在私人电脑使用；清除该站点的浏览器数据会同时删除配置。</small>
+                                </span>
+                            </label>
+
                             <div class="form-actions">
-                                <button class="btn btn-primary" id="saveApiSettingsBtn">
-                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                                    保存 API 配置
+                                <button class="btn btn-primary" id="verifyApiSettingsBtn">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                    验证并启用
                                 </button>
-                                <button class="btn btn-ghost" id="resetApiSettingsBtn">重新加载</button>
+                                <button class="btn btn-outline-danger" id="clearApiSettingsBtn">清除并忘记配置</button>
                             </div>
                         </div>
                     </div>
+                </section>
 
+                <!-- ============== 视图 3：通知设置 ============== -->
+                <section class="view" id="view-settings">
                     <!-- 邮件通知设置卡片 -->
                     <div class="card">
                         <div class="card-header">
@@ -390,8 +423,13 @@
                                     <h2 class="card-title">会话概览</h2>
                                     <p class="card-desc" id="sessionMeta">—</p>
                                 </div>
-                                <div class="session-status" id="sessionStatus">
-                                    <span class="status-badge status-pending">等待中</span>
+                                <div class="session-actions">
+                                    <div class="session-status" id="sessionStatus">
+                                        <span class="status-badge status-pending">等待中</span>
+                                    </div>
+                                    <button class="btn btn-danger btn-sm" id="stopSessionBtn">
+                                        停止当前任务
+                                    </button>
                                 </div>
                             </div>
                             <div class="card-body">
@@ -433,7 +471,7 @@
                         <section class="chat-section">
                             <div class="chat-header">
                                 <h3>对话</h3>
-                                <button class="btn btn-warning btn-sm" id="interruptBtn" style="display:none;">中断并重试</button>
+                                <button class="btn btn-warning btn-sm" id="interruptBtn" style="display:none;">中断并按新指令重试</button>
                             </div>
                             <div class="chat-messages" id="chatMessages">
                                 <!-- 消息动态渲染 -->

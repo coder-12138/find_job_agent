@@ -42,7 +42,13 @@ class AgentEventEmitter(ABC):
         """请求用户选择岗位。返回选中的岗位列表（含志愿顺序）"""
 
     @abstractmethod
-    async def request_user_login(self, request_id: str, login_url: str, message: str) -> str:
+    async def request_user_login(
+        self,
+        request_id: str,
+        login_url: str,
+        message: str,
+        mode: str = "login",
+    ) -> str:
         """请求用户在浏览器窗口中完成登录/注册。
 
         Args:
@@ -205,10 +211,16 @@ class CLIEmitter(AgentEventEmitter):
             print(f"  ✅ 已选择 {len(selected)} 个岗位")
         return selected
 
-    async def request_user_login(self, request_id: str, login_url: str, message: str) -> str:
+    async def request_user_login(
+        self,
+        request_id: str,
+        login_url: str,
+        message: str,
+        mode: str = "login",
+    ) -> str:
         print(f"\n{'='*50}")
-        print(f"🔐 需要登录")
-        print(f"登录页: {login_url}")
+        print("🧭 需要进入申请表单" if mode == "application_form" else "🔐 需要登录")
+        print(f"当前目标: {login_url}")
         print(f"提示: {message}")
         print(f"请在浏览器窗口中完成登录，完成后按回车...")
         print(f"{'='*50}")

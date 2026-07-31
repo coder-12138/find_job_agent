@@ -211,6 +211,65 @@ svg { display: block; }
     animation: pulse 1.2s ease-in-out infinite;
 }
 .status-pill.error .dot { background: var(--error-500); }
+
+.api-connection-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 22px;
+    padding: 14px 16px;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    background: var(--gray-50);
+}
+
+.api-status-dot {
+    width: 10px;
+    height: 10px;
+    margin-top: 5px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: var(--gray-400);
+}
+
+.api-connection-status.testing .api-status-dot {
+    background: var(--warning-500);
+    animation: pulse 1.2s ease-in-out infinite;
+}
+
+.api-connection-status.verified {
+    border-color: var(--success-500);
+    background: var(--success-50);
+}
+
+.api-connection-status.verified .api-status-dot { background: var(--success-500); }
+
+.api-connection-status.error {
+    border-color: var(--error-500);
+    background: var(--error-50);
+}
+
+.api-connection-status.error .api-status-dot { background: var(--error-500); }
+.api-status-title { font-weight: 650; color: var(--gray-800); }
+.api-status-detail { margin-top: 3px; font-size: 13px; color: var(--gray-500); line-height: 1.5; }
+.field-help { margin-top: 6px; font-size: 12px; color: var(--gray-400); }
+
+.remember-api-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 18px 0 4px;
+    padding: 12px 14px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: var(--gray-50);
+    cursor: pointer;
+}
+
+.remember-api-row input { margin-top: 3px; }
+.remember-api-row span { display: flex; flex-direction: column; gap: 3px; }
+.remember-api-row strong { color: var(--gray-700); font-size: 14px; }
+.remember-api-row small { color: var(--gray-400); line-height: 1.5; }
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
@@ -495,6 +554,11 @@ textarea.input { resize: vertical; min-height: 80px; }
     gap: 10px;
 }
 .company-fields .full { grid-column: 1 / -1; }
+.session-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
 .field-mini-label {
     font-size: 11px;
     font-weight: 600;
@@ -1075,6 +1139,22 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .resume-col.polished h4 { color: var(--primary-700); }
 .resume-section { margin-bottom: 12px; }
+.resume-source-card {
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    padding: 10px;
+}
+.resume-source-text {
+    max-height: 560px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--gray-800);
+    user-select: text;
+}
 .resume-section-label {
     font-size: 11px;
     font-weight: 600;

@@ -4,12 +4,14 @@
 并提供查询最新文件路径与列出全部上传文件的能力。
 """
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import UploadFile
 
+from job_application_agent_langchain.user_info.parser import extract_resume_text
 from job_application_agent_langchain.web.schemas import FileUploadResponse
 
 # 项目根目录：web/ -> job_application_agent_langchain/ -> src/ -> workspace/
@@ -63,6 +65,15 @@ async def save_upload_file(file: UploadFile, file_type: str) -> FileUploadRespon
     content = await file.read()
     with open(saved_path, "wb") as f:
         f.write(content)
+
+    # 上传时立即解析一次并写入磁盘缓存。后续会话或 WebUI 重启只需读取缓存，
+    # 不再重复打开并解析同一份 PDF/DOCX。
+    if file_type == "resume":
+        try:
+            await asyncio.to_thread(extract_resume_text, str(saved_path))
+        except Exception as exc:
+            # 文件已经保存成功；解析/缓存异常应在后续流程中报告，而不应伪装成上传失败。
+            print(f"[简历] 上传成功，但预解析失败 ({saved_path.name}): {exc}")
 
     return FileUploadResponse(
         filename=safe_name,

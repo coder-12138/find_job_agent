@@ -5,13 +5,14 @@ WebSocket 连接绑定、事件推送、用户请求响应解析。
 """
 
 import asyncio
+from pathlib import Path
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from fastapi import WebSocket
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from job_application_agent_langchain.agent_events import AgentEventEmitter
 from job_application_agent_langchain.agents.orchestrator import (
@@ -27,6 +28,24 @@ from job_application_agent_langchain.web.emitter import WebEventEmitter
 _DISCONNECTED_SENTINEL = {"__disconnected__": True}
 
 
+def _json_safe(value: Any) -> Any:
+    """把 LangChain 消息等运行时对象转换为 WebSocket 可编码的数据。"""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, BaseMessage):
+        return {
+            "type": getattr(value, "type", value.__class__.__name__),
+            "content": _json_safe(getattr(value, "content", "")),
+        }
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "model_dump"):
+        return _json_safe(value.model_dump())
+    return str(value)
+
+
 @dataclass
 class SessionInfo:
     """单个会话的运行时状态。"""
@@ -35,7 +54,7 @@ class SessionInfo:
     emitter: WebEventEmitter
     task: asyncio.Task | None = None
     websocket: WebSocket | None = None
-    # pending / running / completed / error / disconnected
+    # pending / running / completed / error / disconnected / cancelled
     status: str = "pending"
     results: dict[str, Any] = field(default_factory=dict)
     pending_requests: dict[str, asyncio.Future] = field(default_factory=dict)
@@ -57,6 +76,13 @@ class SessionInfo:
     message_history: list = field(default_factory=list)
     # Agent 运行期间收到的用户消息队列，当前 ainvoke 完成后自动续接
     pending_user_messages: list = field(default_factory=list)
+    cancel_requested: bool = False
+    last_event_at: str = ""
+    last_phase: str = ""
+    last_message: str = ""
+    profile_id: str = ""
+    profile_version_id: str = ""
+    temporary_files: list[str] = field(default_factory=list)
 
 
 class SessionManager:
@@ -75,6 +101,9 @@ class SessionManager:
         parallel: bool,
         user_info: UserInfo,
         memory: AgentMemory | None = None,
+        profile_id: str = "",
+        profile_version_id: str = "",
+        temporary_files: list[str] | None = None,
     ) -> str:
         """创建会话并启动后台 Agent 任务。返回 session_id。
 
@@ -95,6 +124,9 @@ class SessionManager:
             companies=companies,
             parallel=parallel,
             user_info=user_info,
+            profile_id=profile_id,
+            profile_version_id=profile_version_id,
+            temporary_files=list(temporary_files or []),
         )
         self.sessions[session_id] = info
 
@@ -130,10 +162,16 @@ class SessionManager:
                 message_history=info.message_history,
             )
             info.results = results if isinstance(results, dict) else {}
-            # 判定整体状态
-            if info.results.get("status") == "error":
+            company_errors = [
+                str(result.get("error") or f"{company_name} 执行失败")
+                for company_name, result in info.results.items()
+                if isinstance(result, dict) and result.get("status") == "error"
+            ]
+            # 顶层错误或任何公司错误都不能显示成“会话已完成”。
+            if info.results.get("status") == "error" or company_errors:
                 info.status = "error"
-                info.error = "; ".join(info.results.get("errors", []))
+                top_errors = info.results.get("errors", [])
+                info.error = "; ".join([*map(str, top_errors), *company_errors])
             else:
                 info.status = "completed"
                 # 从结果中提取消息列表，更新 message_history（仅保留 Human/AI 消息）
@@ -174,7 +212,7 @@ class SessionManager:
                     session_id, user_info, companies, parallel, emitter
                 )
         except asyncio.CancelledError:
-            info.status = "disconnected"
+            info.status = "cancelled" if info.cancel_requested else "disconnected"
             raise
         except Exception as e:
             info.status = "error"
@@ -305,7 +343,7 @@ class SessionManager:
                 session_id, {"type": "session_complete", "results": info.results}
             )
         except asyncio.CancelledError:
-            info.status = "disconnected"
+            info.status = "cancelled" if info.cancel_requested else "disconnected"
             raise
         except Exception as e:
             info.status = "error"
@@ -370,6 +408,54 @@ class SessionManager:
         )
         return {"status": "restarted"}
 
+    async def cancel_session(self, session_id: str) -> dict:
+        """停止当前会话并关闭共享浏览器，不创建新的 Agent 任务。"""
+        info = self.sessions.get(session_id)
+        if info is None:
+            return {"error": "session not found"}
+
+        info.cancel_requested = True
+        info.pending_user_messages.clear()
+        for future in list(info.pending_requests.values()):
+            if not future.done():
+                future.set_result(_DISCONNECTED_SENTINEL)
+        info.pending_requests.clear()
+
+        task = info.task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        from job_application_agent_langchain.browser.automation import BrowserAutomation
+
+        await BrowserAutomation.close_shared()
+        self.cleanup_temporary_files(session_id)
+        info.status = "cancelled"
+        await self.push_event(
+            session_id,
+            {"type": "session_cancelled", "message": "任务已由用户停止"},
+        )
+        return {"status": "cancelled"}
+
+    def cleanup_temporary_files(self, session_id: str | None = None) -> None:
+        """Remove plaintext resume copies on cancellation or server shutdown."""
+
+        infos = (
+            [self.sessions[session_id]]
+            if session_id and session_id in self.sessions
+            else list(self.sessions.values())
+        )
+        for info in infos:
+            for file_path in info.temporary_files:
+                try:
+                    Path(file_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            info.temporary_files.clear()
+
     # ------------------------------------------------------------------
     # WebSocket 绑定与事件推送
     # ------------------------------------------------------------------
@@ -419,16 +505,23 @@ class SessionManager:
         info = self.sessions.get(session_id)
         if info is None:
             return
+        safe_event = _json_safe(event)
+        info.last_event_at = datetime.now().isoformat()
+        if safe_event.get("type") == "progress":
+            info.last_phase = safe_event.get("phase", "")
+            info.last_message = safe_event.get("message", "")
         ws = info.websocket
         if ws is not None:
             try:
-                await ws.send_json(event)
+                await ws.send_json(safe_event)
                 return
             except Exception as e:
                 print(f"[session_manager] WebSocket 推送失败，转为缓存: {e}")
                 info.websocket = None
         # 缓存事件，等待 WebSocket 连接后冲刷
-        info.event_queue.append(event)
+        info.event_queue.append(safe_event)
+        if len(info.event_queue) > 500:
+            info.event_queue = info.event_queue[-500:]
 
     # ------------------------------------------------------------------
     # 请求 future 管理
@@ -482,9 +575,12 @@ class SessionManager:
             "created_at": info.created_at,
             "parallel": info.parallel,
             "companies": [c.company_name for c in info.companies],
-            "results": info.results,
+            "results": _json_safe(info.results),
             "error": info.error,
             "pending_requests": list(info.pending_requests.keys()),
+            "last_event_at": info.last_event_at,
+            "last_phase": info.last_phase,
+            "last_message": info.last_message,
         }
 
 
