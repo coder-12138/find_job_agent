@@ -5,29 +5,12 @@
 """
 
 import os
-import sys
-
 from job_application_agent_langchain.config import Settings
 
 
-def _check_env() -> None:
-    """检查 .env 配置，未配置时给出友好提示并退出。"""
-    settings = Settings()
-    errors = settings.validate()
-    if errors:
-        print("\n❌ 配置错误:")
-        for e in errors:
-            print(f"  - {e}")
-        print("\n请在项目根目录的 .env 文件中配置以上项目后重试。")
-        print("可参考 .env.example 文件。")
-        sys.exit(1)
-    print("✅ 配置验证通过")
-
-
 def main() -> None:
-    _check_env()
-
     settings = Settings()
+    print("ℹ️  Agent API 配置请在 Web UI 左栏「Agent 连接」中输入并验证。")
     if not os.path.exists(settings.personal_info_file_path):
         print(
             f"\n⚠️  个人信息文件不存在: {settings.personal_info_file_path}\n"
@@ -36,11 +19,12 @@ def main() -> None:
 
     import uvicorn
 
-    print("🚀 启动 Web 服务: http://0.0.0.0:8000")
-    print("   API 文档: http://0.0.0.0:8000/docs")
+    print("🚀 启动 Web 服务: http://127.0.0.1:8000")
+    print("   任务前端: http://127.0.0.1:8000/app")
+    print("   API 文档: http://127.0.0.1:8000/docs")
     uvicorn.run(
         "job_application_agent_langchain.web.app:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
         reload=False,
     )

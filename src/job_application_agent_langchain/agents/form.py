@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain_core.tools import tool
 
 from job_application_agent_langchain.tools.notify import notify_user, notify_delivery_warning, ask_user_for_field
@@ -124,6 +126,11 @@ async def get_current_page_form() -> str:
         fields = await browser.get_form_fields()
         if not fields:
             return "当前页面未找到表单字段"
+        from job_application_agent_langchain.agents.company_agent import (
+            mark_application_form_ready,
+        )
+
+        mark_application_form_ready(True)
 
         result_lines = ["当前页面表单字段:"]
         for i, field in enumerate(fields):
@@ -134,6 +141,15 @@ async def get_current_page_form() -> str:
                 info += f", label: {field['label']}"
             if field.get("placeholder"):
                 info += f", placeholder: {field['placeholder']}"
+            if field.get("aria_label"):
+                info += f", aria-label: {field['aria_label']}"
+            if field.get("section"):
+                info += f", 分组: {field['section']}"
+            info += f", 必填: {'是' if field.get('required') else '否'}"
+            if field.get("value"):
+                info += ", 当前已有值"
+            else:
+                info += ", 当前为空"
             if field.get("options"):
                 info += f", 选项: {field['options']}"
             info += f", 选择器: {field.get('selector', '')}"
@@ -148,17 +164,14 @@ async def get_current_page_form() -> str:
 async def submit_application(
     submit_button_selector: str = 'button:has-text("投递"), button:has-text("提交"), button:has-text("申请")',
 ) -> str:
-    """执行投递操作，点击提交/投递按钮。
+    """Safety boundary: never click an irreversible final submission button.
 
     Args:
         submit_button_selector: 提交按钮的CSS选择器
     """
     try:
-        browser = await _get_browser()
-        success = await browser.click_button(submit_button_selector)
-        if success:
-            return "投递操作已执行"
-        return "投递按钮点击失败，可能未找到按钮"
+        del submit_button_selector
+        return "已停在最终提交前；请用户在受管浏览器窗口中检查并亲自点击提交"
     except Exception as e:
         return f"投递时出错: {e}"
 
@@ -167,6 +180,12 @@ async def submit_application(
 async def take_screenshot_for_review() -> str:
     """截取当前页面截图，供用户检查。"""
     try:
+        from job_application_agent_langchain.agents.company_agent import (
+            is_application_form_ready,
+        )
+
+        if not is_application_form_ready():
+            return "FORM_NOT_READY：当前页面尚未验证为申请表单，拒绝生成填表完成截图"
         browser = await _get_browser()
         screenshot_path = await browser.take_screenshot()
         return f"截图已保存到: {screenshot_path}"
@@ -237,12 +256,18 @@ async def polish_resume_for_jd(jd: str, resume_content: str) -> str:
 
     from job_application_agent_langchain.agents.company_agent import (
         _get_llm,
+        get_company_emitter,
+        get_company_state,
         get_company_user_info,
     )
     from job_application_agent_langchain.config import Settings
-    from job_application_agent_langchain.resume_polish.polisher import polish_resume
+    from job_application_agent_langchain.resume_polish.polisher import (
+        polish_resume_async,
+    )
     from job_application_agent_langchain.user_info.parser import load_user_info
 
+    uploaded_resume_text = ""
+    profile_version_id = ""
     try:
         # 优先从公司子 Agent 上下文获取用户信息，否则回退到本地文件加载
         user_info = get_company_user_info()
@@ -252,28 +277,138 @@ async def polish_resume_for_jd(jd: str, resume_content: str) -> str:
                 settings.personal_info_file_path, settings.resume_file_path
             )
 
-        # resume_content 若为 JSON 对象/数组，解析为额外上下文
-        extra_context = None
+        # 始终优先读取 WebUI 上传简历的真实原文；Agent 传入的纯文本也不能丢弃。
+        extra_context = {}
+        profile_version_id = str(
+            user_info.extra_fields.get("profile_version_id") or ""
+        )
+        uploaded_resume_text = str(
+            user_info.extra_fields.get("resume_text") or ""
+        ).strip()
+        resume_text_source = "session_profile"
+        if not uploaded_resume_text:
+            # 复用档案建立时已经保存的提取正文，不重新读取或解析 PDF。
+            from job_application_agent_langchain.api_v2.dependencies import (
+                get_profile_service,
+                get_resume_extraction_service,
+            )
+            from job_application_agent_langchain.application.resume_extractions import (
+                ResumeExtractionService,
+            )
+
+            profiles = get_profile_service()
+            version = (
+                profiles.get_version(profile_version_id)
+                if profile_version_id
+                else profiles.get_active_version()
+            )
+            extraction = get_resume_extraction_service().get(
+                version.source_file_resource_id
+            )
+            uploaded_resume_text = ResumeExtractionService.plain_text(
+                extraction or {}
+            )
+            profile_version_id = version.id
+            resume_text_source = "archived_extraction"
+            if uploaded_resume_text:
+                user_info.extra_fields["resume_text"] = uploaded_resume_text
+                user_info.extra_fields["profile_version_id"] = profile_version_id
+        if uploaded_resume_text:
+            extra_context["raw_resume_text"] = uploaded_resume_text
+            extra_context["resume_file_path"] = user_info.resume_file_path
         if resume_content:
             try:
                 parsed = json.loads(resume_content)
                 if isinstance(parsed, dict):
-                    extra_context = parsed
+                    # A model/tool argument must not overwrite the trusted text
+                    # extracted from the profile version's encrypted source PDF.
+                    if uploaded_resume_text:
+                        parsed = {
+                            key: value
+                            for key, value in parsed.items()
+                            if key not in {"raw_resume_text", "resume_file_path"}
+                        }
+                    extra_context.update(parsed)
                 elif isinstance(parsed, list):
-                    extra_context = {"resume_items": parsed}
+                    extra_context["resume_items"] = parsed
             except (json.JSONDecodeError, TypeError):
-                extra_context = None
+                extra_context["agent_resume_content"] = str(resume_content)
+
+        if not uploaded_resume_text and not resume_content:
+            raise ValueError(
+                "未读取到简历内容。请先在 WebUI 文件上传中上传可提取文本的 PDF、DOCX、TXT 或 MD 简历"
+            )
 
         llm = _get_llm()
-        result = polish_resume(user_info, jd, llm, extra_context=extra_context)
+        emitter = get_company_emitter()
+        company = get_company_state()
+
+        async def report_progress(message: str) -> None:
+            if emitter:
+                await emitter.emit_progress(
+                    "polish",
+                    message,
+                    company.company_name if company else "",
+                )
+
+        settings = Settings()
+        try:
+            async with asyncio.timeout(max(10, settings.polish_total_timeout)):
+                result = await polish_resume_async(
+                    user_info,
+                    jd,
+                    llm,
+                    extra_context=extra_context or None,
+                    progress_callback=report_progress,
+                    stage_timeout=settings.polish_stage_timeout,
+                    generation_timeout=settings.polish_generation_timeout,
+                )
+        except TimeoutError as exc:
+            await report_progress(f"简历润色已停止：{exc}")
+            raise
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
+        try:
+            from job_application_agent_langchain.agents.company_agent import (
+                get_company_emitter,
+                get_company_state,
+            )
+
+            company = get_company_state()
+            emitter = get_company_emitter()
+            if company:
+                company.status = "polish_failed"
+                company.error_message = f"简历润色失败: {e}"
+            if emitter:
+                await emitter.emit_progress(
+                    "polish",
+                    f"简历润色失败并已停止，不会自动重试：{e}",
+                    company.company_name if company else "",
+                )
+                await emitter.emit_log(
+                    "error",
+                    "简历润色失败："
+                    f"{type(e).__name__}: {e}；"
+                    f"档案正文 {len(uploaded_resume_text)} 字符；"
+                    f"档案版本 {profile_version_id or 'unknown'}",
+                )
+        except Exception:
+            pass
         return json.dumps(
             {
+                "ok": False,
                 "original": {},
                 "polished": {},
                 "note": f"简历润色失败: {e}",
                 "error": str(e),
+                "error_type": type(e).__name__,
+                "diagnostics": {
+                    "resume_text_characters": len(uploaded_resume_text),
+                    "profile_version_id": profile_version_id,
+                    "resume_text_source": locals().get(
+                        "resume_text_source", "unavailable"
+                    ),
+                },
             },
             ensure_ascii=False,
         )

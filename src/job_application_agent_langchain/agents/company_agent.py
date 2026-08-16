@@ -4,9 +4,11 @@
 使用 deepagents 框架作为 harness，通过 AgentEventEmitter 接口与用户交互。
 """
 
+import asyncio
 import contextvars
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
@@ -46,8 +48,14 @@ _recommended_positions_ctx: contextvars.ContextVar[list[dict] | None] = contextv
 _selected_positions_ctx: contextvars.ContextVar[list[dict] | None] = contextvars.ContextVar(
     "company_selected_positions", default=None
 )
+_reviewed_resume_ctx: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "company_reviewed_resume", default=None
+)
 _form_filled_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "company_form_filled", default=False
+)
+_form_ready_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "company_form_ready", default=False
 )
 _submitted_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "company_submitted", default=False
@@ -109,6 +117,14 @@ def clear_missing_fields() -> None:
     _missing_fields_ctx.set([])
 
 
+def is_application_form_ready() -> bool:
+    return _form_ready_ctx.get()
+
+
+def mark_application_form_ready(ready: bool = True) -> None:
+    _form_ready_ctx.set(ready)
+
+
 # ============================================================================
 # LLM 与 Agent 创建
 # ============================================================================
@@ -121,6 +137,8 @@ def _get_llm() -> ChatOpenAI:
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         temperature=0.3,
+        timeout=settings.llm_request_timeout,
+        max_retries=settings.llm_max_retries,
     )
 
 
@@ -202,6 +220,7 @@ async def report_recommended_positions(positions_json: str) -> str:
     company = _company_ctx.get()
     if company:
         company.recommended_positions = positions
+        company.search_completed = True
 
     return f"已记录 {len(positions)} 个推荐岗位"
 
@@ -252,6 +271,32 @@ async def request_resume_review(polished_json: str) -> str:
     except json.JSONDecodeError:
         return json.dumps({"error": "polished_json 不是有效的 JSON"}, ensure_ascii=False)
 
+    error = str(data.get("error") or "").strip()
+    if error or data.get("ok") is False:
+        diagnostics = data.get("diagnostics") or {}
+        resume_characters = diagnostics.get("resume_text_characters", 0)
+        message = (
+            f"润色失败，已阻止打开空白审核框：{error or '未知错误'}；"
+            f"进入润色工具的档案正文为 {resume_characters} 字符"
+        )
+        company = _company_ctx.get()
+        if company:
+            company.status = "polish_failed"
+            company.error_message = message
+        emitter = _emitter_ctx.get()
+        if emitter:
+            await emitter.emit_progress(
+                "polish", message, company.company_name if company else ""
+            )
+            await emitter.emit_log("error", message)
+        return json.dumps(
+            {
+                "error": error or "润色工具返回失败",
+                "diagnostics": diagnostics,
+            },
+            ensure_ascii=False,
+        )
+
     original = data.get("original", {})
     polished = data.get("polished", {})
 
@@ -261,12 +306,34 @@ async def request_resume_review(polished_json: str) -> str:
     if isinstance(polished, str):
         polished = {"content": polished}
 
+    if not isinstance(original, dict) or not isinstance(polished, dict):
+        return json.dumps(
+            {"error": "润色结果结构无效，已阻止打开审核框"},
+            ensure_ascii=False,
+        )
+    if not original or not polished or not any(
+        value not in (None, "", [], {}) for value in polished.values()
+    ):
+        message = "润色结果为空，已阻止打开空白审核框"
+        company = _company_ctx.get()
+        if company:
+            company.status = "polish_failed"
+            company.error_message = message
+        emitter = _emitter_ctx.get()
+        if emitter:
+            await emitter.emit_progress(
+                "polish", message, company.company_name if company else ""
+            )
+            await emitter.emit_log("error", message)
+        return json.dumps({"error": message}, ensure_ascii=False)
+
     emitter = _emitter_ctx.get()
     if not emitter:
         return json.dumps({"error": "无事件发射器", "confirmed": polished}, ensure_ascii=False)
 
     request_id = generate_request_id()
     confirmed = await emitter.request_resume_review(request_id, original, polished)
+    _reviewed_resume_ctx.set(confirmed if isinstance(confirmed, dict) else polished)
 
     return json.dumps({"confirmed_content": confirmed}, ensure_ascii=False)
 
@@ -305,8 +372,7 @@ async def request_missing_fields() -> str:
 
 @tool
 async def request_delivery_confirmation() -> str:
-    """请求用户确认是否由 AI 自动执行投递。
-    弹出醒目警告，因为部分校招网站一旦投递后无法修改。
+    """Wait for the user to perform the irreversible final submit manually.
 
     Returns:
         "confirmed" 或 "cancelled"
@@ -317,25 +383,56 @@ async def request_delivery_confirmation() -> str:
 
     if not emitter:
         return "cancelled"
+    if not _form_ready_ctx.get() or not _form_filled_ctx.get():
+        await emitter.emit_progress(
+            "fill",
+            "申请表单尚未验证并完成填写，已阻止进入最终提交确认",
+            company_name,
+        )
+        return "cancelled"
 
     request_id = generate_request_id()
-    title = f"⚠️ 重要警告 - {company_name} 投递确认"
+    title = f"最终提交由你完成 - {company_name}"
     message = (
         f"公司: {company_name}\n\n"
-        "⚠️ 重要警告：执行此步，AI agent 将直接自动完成简历投递，"
-        "不会再暂停让您检查并确认。"
-        "部分校招网站一旦投递后，无法（或者很难）修改志愿和投递岗位，请谨慎选择。"
+        "表单已经自动填写并暂停。请回到系统弹出的受管浏览器窗口，"
+        "检查所有字段后，由你亲自点击网站的最终提交按钮。\n"
+        "完成后再回到这里确认结果。不要把链接复制到其他浏览器，"
+        "其他浏览器不会共享当前登录和表单会话。"
     )
-    options = ["由 AI 自动完成投递", "不由 AI 投递，结束该公司流程"]
+    options = ["我已在受管浏览器完成提交", "暂不提交，结束该公司流程"]
 
     selected = await emitter.request_confirmation(request_id, title, message, options)
 
     if selected == options[0]:
-        _submitted_ctx.set(True)
+        outcome = "outcome_unknown"
+        outcome_message = "未观察到可验证的投递回执"
+        try:
+            from job_application_agent_langchain.browser.automation import BrowserAutomation
+
+            browser = await BrowserAutomation.get_shared()
+            learned = await browser.capture_manual_interaction_proposals()
+            if learned:
+                await emitter.emit_log(
+                    "info", f"已记录 {learned} 条不含输入值的交互候选，需审核后才会复用"
+                )
+            outcome, outcome_message = await browser.inspect_submission_outcome()
+        except Exception:
+            pass
+        if outcome == "submitted":
+            _submitted_ctx.set(True)
+            if company:
+                company.submitted = True
+                company.status = "submitted"
+            return "confirmed"
         if company:
-            company.submitted = True
-            company.status = "submitted"
-        return "confirmed"
+            company.submitted = False
+            company.status = "submission_outcome_unknown"
+            company.error_message = outcome_message
+        await emitter.emit_progress(
+            "submit", f"用户已执行最终提交，但结果尚无法验证：{outcome_message}", company_name
+        )
+        return "outcome_unknown"
     else:
         if company:
             company.status = "user_skipped"
@@ -345,6 +442,8 @@ async def request_delivery_confirmation() -> str:
 @tool
 async def report_form_filled() -> str:
     """报告表单已填写完成。在调用 take_screenshot_for_review 后、请求投递确认前调用此工具。"""
+    if not _form_ready_ctx.get():
+        return "FORM_NOT_READY：当前页面尚未验证为所选岗位的申请表单，不能标记填写完成"
     _form_filled_ctx.set(True)
     company = _company_ctx.get()
     if company:
@@ -370,17 +469,156 @@ async def request_user_login(login_url: str) -> str:
     if not emitter:
         return "logged_in"  # 无 emitter 时直接继续
 
-    request_id = generate_request_id()
     company = _company_ctx.get()
     company_name = company.company_name if company else ""
-    message = (
-        f"请在弹出的浏览器窗口中完成「{company_name}」的登录或注册。\n"
-        f"登录页: {login_url}\n"
-        f"支持扫码、短信验证码、账号密码等任意登录方式。\n"
-        f"完成后请点击下方'已完成登录'按钮。"
+    _form_ready_ctx.set(False)
+    from job_application_agent_langchain.browser.automation import BrowserAutomation
+
+    browser = await BrowserAutomation.get_shared()
+    selected = _selected_positions_ctx.get() or []
+    selected_position = selected[0] if selected else {}
+    position_url = str(selected_position.get("url") or login_url)
+    position_name = str(
+        selected_position.get("name") or selected_position.get("title") or ""
     )
-    result = await emitter.request_user_login(request_id, login_url, message)
-    return result
+    source_list_url = str(selected_position.get("source_list_url") or "")
+    current_only = False
+
+    while True:
+        try:
+            learned = await browser.capture_manual_interaction_proposals()
+            if learned:
+                await emitter.emit_log(
+                    "info",
+                    f"已记录 {learned} 条不含输入值的登录/导航候选，需审核后才会复用",
+                )
+            await emitter.emit_progress(
+                "login",
+                f"正在恢复已选岗位“{position_name or position_url}”并打开申请表单",
+                company_name,
+            )
+            prepared = await browser.prepare_application_form(
+                position_url,
+                position_name=position_name,
+                source_list_url=source_list_url,
+                current_only=current_only,
+            )
+            if prepared.get("ready"):
+                _form_ready_ctx.set(True)
+                prefill: dict[str, Any] = {}
+                user_info = _user_info_ctx.get()
+                if user_info is not None:
+                    await emitter.emit_progress(
+                        "fill",
+                        "已识别申请表单，正在上传一次简历并等待网站解析后主动填写档案字段",
+                        company_name,
+                    )
+                    try:
+                        prefill = await browser.prefill_application_form(
+                            user_info,
+                            reviewed_resume=_reviewed_resume_ctx.get() or {},
+                            resume_path=user_info.resume_file_path,
+                        )
+                    except Exception as exc:
+                        prefill = {
+                            "kind": "prefill_failed",
+                            "filled_fields": [],
+                            "skipped_fields": [],
+                            "message": str(exc),
+                        }
+                    filled = prefill.get("filled_fields") or []
+                    skipped = prefill.get("skipped_fields") or []
+                    evidence = prefill.get("evidence") or {}
+                    await emitter.emit_progress(
+                        "fill",
+                        f"确定性预填完成：已填 {len(filled)} 项"
+                        f"（{', '.join(filled) or '无'}）；"
+                        f"档案中有值但页面未识别 {len(skipped)} 项"
+                        f"（{', '.join(skipped) or '无'}）；"
+                        f"当前可见控件 {evidence.get('visible_control_count', 0)} 个",
+                        company_name,
+                    )
+                await emitter.emit_progress(
+                    "fill",
+                    f"已打开所选岗位申请表单：{prepared.get('url', '')}",
+                    company_name,
+                )
+                return (
+                    "logged_in_application_form_ready\nPREFILL_RESULT="
+                    + json.dumps(prefill, ensure_ascii=False)
+                )
+        except Exception as exc:
+            prepared = {
+                "kind": "navigation_failed",
+                "url": browser.page.url,
+                "message": str(exc),
+                "attempts": [],
+            }
+
+        if prepared.get("kind") == "login_required":
+            message = (
+                f"申请入口确认需要登录。请在当前同一个受管浏览器窗口中完成「{company_name}」"
+                "的登录或注册。\n"
+                f"当前页面: {prepared.get('url') or login_url}\n"
+                "支持扫码、短信验证码、账号密码等任意登录方式。\n"
+                "不要复制链接，也不要另开普通浏览器。登录完成后点击下方按钮，"
+                "系统将在当前岗位继续打开申请表单。"
+            )
+            result = await emitter.request_user_login(
+                generate_request_id(),
+                str(prepared.get("url") or login_url),
+                message,
+                mode="login",
+            )
+            if result != "logged_in":
+                return result
+            current_only = False
+            continue
+
+        attempts = prepared.get("attempts") or []
+        attempt_summary = "；".join(
+            f"{item.get('stage')}={item.get('kind')}"
+            for item in attempts[-5:]
+            if isinstance(item, dict)
+        )
+        await emitter.emit_progress(
+            "login",
+            f"自动恢复暂未进入申请表单：{prepared.get('message', '页面状态未知')}；"
+            f"当前页面 {prepared.get('url', '')}；尝试记录 {attempt_summary or '无'}。"
+            "受管浏览器将保持打开，任务正在等待你手动调整后重新检测。",
+            company_name,
+        )
+        if prepared.get("kind") == "application_action_pending":
+            current_only = True
+            retry_message = (
+                f"系统已经在所选岗位点击申请入口，并保持当前页面不动：\n"
+                f"岗位：{position_name or '名称未知'}\n"
+                f"详情：{position_url}\n\n"
+                "尚未识别到申请表单，但不会回退岗位列表，也不会再次新开页面。"
+                "如果页面稍后出现表单或登录页，点击下方按钮即可接管并继续。"
+            )
+        else:
+            retry_message = (
+                f"系统已保存并尝试了岗位详情地址、原岗位列表和岗位名称：\n"
+                f"岗位：{position_name or '名称未知'}\n"
+                f"详情：{position_url}\n"
+                f"列表：{source_list_url or '已从详情地址推导'}\n\n"
+                "当前仍未识别到申请表单。受管浏览器和当前任务都会保持打开。"
+                "你可以在同一受管窗口中手动进入该岗位申请表单，然后点击下方按钮；"
+                "也可以直接点击按钮，让系统再次执行完整恢复。"
+            )
+        result = await emitter.request_user_login(
+            generate_request_id(),
+            str(prepared.get("url") or position_url),
+            retry_message,
+            mode=(
+                "application_form_wait"
+                if current_only
+                else "application_form"
+            ),
+        )
+        if result not in {"logged_in", "ready_for_form_check", "retry"}:
+            return result
 
 
 # ============================================================================
@@ -429,13 +667,22 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 1. 调用 emit_progress（phase="search"）通知用户开始搜索
    注意：如果待投递公司信息中已提供「投递链接」（application_url 不为空），则跳过步骤 2 的 search_company_website，直接用 navigate_and_find_positions 导航到该链接。若链接是微信公众号推文（mp.weixin.qq.com），暂时提示无法处理并跳过该公司。
 2. 调用 search_company_website 搜索{company.company_name}的{company.recruitment_type}官网
+   如果工具返回 SEARCH_ABORTED，说明搜索已超时或网站不可达。不要再次调用搜索工具，
+   立即调用 emit_progress 告知用户并结束该公司流程。
 3. 调用 navigate_and_find_positions 导航到官网并查找相关岗位
+   工具会识别“页面不存在/已迁移/站点错误”等伪成功页面，并自动尝试最多 3 个候选链接。
+   如果所有候选都失败并返回 SEARCH_ABORTED，不要再重试或猜测其他链接，结束该公司流程，
+   并提示用户在 Web UI 中手动填写确认可访问的招聘官网或岗位列表网址。
    注意：部分公司官网（如小鹏汽车）登录后初始页面没有职位列表，需要点击“即刻投递”等入口按钮。
    navigate_and_find_positions 会自动尝试点击常见入口按钮。若返回信息显示“未找到常见入口按钮”，
    请调用 get_visible_buttons_tool 查看页面所有可点击元素，再调用 click_element_by_text_tool 
    点击合适的入口按钮（如“即刻投递”/“开始找工作”/“查看职位”等）。
+   若返回中包含“结构化匹配岗位”，这些岗位已经按期望地区做过硬筛选、按关键词排序：
+   直接以它们作为推荐候选，不要再逐个调用 get_position_details，也不要推荐其他地区。
+   如果手动点击入口后才出现岗位列表，调用 extract_matching_positions 批量提取。
 4. 调用 find_max_positions 查找该公司可投递的最大岗位数
-5. 对有潜力的岗位调用 get_position_details 获取详情
+5. 仅当步骤 3 没有返回结构化岗位时，才对少量有潜力的岗位调用 get_position_details 获取详情；
+   禁止为了筛选而遍历打开大量岗位详情页。
 6. 根据用户信息（专业、经历、技能）推荐 2n 个岗位（n 为可投递最大数，若未知则推荐 3-5 个）
 7. 调用 report_recommended_positions 记录推荐岗位列表
 8. 调用 emit_progress（phase="recommend"）通知用户岗位推荐完成
@@ -448,23 +695,26 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 11. 调用 emit_progress（phase="polish"）通知用户开始润色
 12. 对选中的第一个岗位调用 get_position_details 获取完整 JD
 13. 将用户简历信息和 JD 传给 polish_resume_for_jd 进行润色
+   polish_resume_for_jd 会显示“JD 分析”和“生成润色”两个子步骤并分别超时。
+   如果返回 error，禁止再次调用润色工具；通知用户具体错误并结束该公司流程。
 14. 调用 request_resume_review 请用户审核润色后的简历
 15. 记录用户确认的简历内容，用于后续填表
 
 ### 阶段 3.5: 用户登录/注册
 15.5. 调用 emit_progress（phase="login"）通知用户需要登录
-15.6. 导航到该公司的登录页面（通常点击页面上的“登录”按钮即可跳转）
-15.7. 调用 request_user_login(login_url) 请求用户在浏览器窗口中完成登录
+15.6. 保持当前受管浏览器窗口，不要要求用户复制或另开链接
+15.7. 调用 request_user_login(login_url) 请求用户在该受管窗口中完成登录
       - 系统以非 headless 模式启动浏览器，用户可在弹出的浏览器窗口中自行操作
       - 支持扫码、短信验证码、账号密码等任意登录方式
       - 用户可能需要先注册，同样在该浏览器窗口中完成
-15.8. 用户确认后，调用 check_login_status_tool 验证登录状态
-15.9. 若未登录，提示用户重新登录；若已登录，继续后续填表流程
+15.8. request_user_login 会在用户确认后确定性返回所选岗位、点击申请入口并验证表单
+15.9. request_user_login 会持续保留受管浏览器并等待重新检测；只有工具返回以 logged_in_application_form_ready 开头的结果才能继续填表
+      该工具会在识别表单后确定性地上传一次简历、等待网站解析稳定，并主动预填档案中的基础/教育/工作/项目字段
 
 ### 阶段 4: 填写表单
 17. 调用 emit_progress（phase="fill"）通知用户开始填表
-18. 调用 get_current_page_form 获取当前页面表单字段
-19. 如有简历上传需求，调用 upload_resume 上传简历（使用文件路径）
+18. 阅读 request_user_login 返回的 PREFILL_RESULT，然后调用 get_current_page_form 重新扫描网站解析后剩余的表单字段
+19. request_user_login 已处理简历上传；禁止再次调用 upload_resume 重复上传
 20. 对每个必填字段：
     - 调用 check_field_in_memory 检查记忆中是否有值
     - 如果返回 FIELD_FOUND，使用该值调用 fill_form_field 填写
@@ -472,13 +722,13 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 21. 所有可填字段填写完成后，调用 request_missing_fields 批量请求用户补充缺失字段
 22. 用用户补充的值调用 fill_form_field 填写之前缺失的字段
 
-### 阶段 5: 投递确认与提交
+### 阶段 5: 人工最终提交
 23. 调用 take_screenshot_for_review 截图供用户检查
 24. 调用 emit_screenshot 推送截图给用户
 25. 调用 report_form_filled 标记表单已填写完成
 26. 调用 emit_progress（phase="confirm"）通知用户等待确认
-27. 调用 request_delivery_confirmation 请求用户确认是否投递
-28. 如果返回 "confirmed"，调用 emit_progress（phase="submit"）后调用 submit_application 执行投递
+27. 调用 request_delivery_confirmation，等待用户在受管浏览器中亲自检查并点击最终提交
+28. 如果返回 "confirmed"，调用 emit_progress（phase="submit"）记录已观察到成功回执；如果返回 "outcome_unknown"，明确报告结果未知并结束，禁止伪造成功；禁止调用 submit_application 自动点击最终提交按钮
 29. 如果返回 "cancelled"，结束流程（状态: user_skipped）
 
 ## 重要规则：
@@ -491,6 +741,8 @@ def _build_system_prompt(user_info: UserInfo, company: CompanyState, file_paths:
 - 如果任何步骤出错，使用 emit_progress 通知用户并尝试继续或结束
 - 用户可能在运行中通过 Web UI 发送指导消息，请遵循用户指令调整行为
 - 浏览器以非 headless 模式启动，用户可直接在浏览器窗口中操作（登录、扫码等）
+- 最终提交按钮只能由用户在受管浏览器窗口中亲自点击，Agent 不得代点
+- 未验证为申请表单时，禁止调用 report_form_filled、take_screenshot_for_review 或进入投递确认
 """
 
 
@@ -537,6 +789,162 @@ def get_company_agent_tools() -> list:
     return merged
 
 
+class SearchPhaseTimeoutError(RuntimeError):
+    """Agent 未能在规定时间内完成搜索与岗位推荐阶段。"""
+
+
+def _parse_structured_positions(navigation_result: str) -> list[dict[str, Any]]:
+    """从确定性导航工具结果中取出结构化岗位 JSON。"""
+    lines = (navigation_result or "").splitlines()
+    for index, line in enumerate(lines):
+        if "结构化匹配岗位" not in line or index + 1 >= len(lines):
+            continue
+        try:
+            positions = json.loads(lines[index + 1])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(positions, list):
+            return [item for item in positions if isinstance(item, dict)]
+    return []
+
+
+def _feishu_presearch_url(company: CompanyState) -> str:
+    """识别可走确定性飞书招聘预搜索的公司网址。"""
+    candidates = [company.application_url, *company.candidate_urls]
+    for candidate in candidates:
+        try:
+            if urlparse(candidate).hostname and (
+                urlparse(candidate).hostname or ""
+            ).lower().endswith("jobs.feishu.cn"):
+                return candidate
+        except Exception:
+            continue
+    # 小鹏当前校招站入口稳定，避免让 LLM 先花数轮重新搜索同一网址。
+    if "小鹏" in company.company_name:
+        return "https://xiaopeng.jobs.feishu.cn/398875"
+    return ""
+
+
+def _deterministic_presearch_url(company: CompanyState) -> str:
+    """识别已有确定性页面适配器的招聘网址。"""
+    feishu_url = _feishu_presearch_url(company)
+    if feishu_url:
+        return feishu_url
+    candidates = [company.application_url, *company.candidate_urls]
+    for candidate in candidates:
+        try:
+            host = (urlparse(candidate).hostname or "").lower()
+            if host == "careers.oppo.com":
+                return candidate
+        except Exception:
+            continue
+    if company.company_name.strip().lower() == "oppo":
+        return "https://careers.oppo.com/university/oppo/campus"
+    return ""
+
+
+async def _prefetch_structured_positions(
+    company: CompanyState,
+    emitter: AgentEventEmitter,
+) -> list[dict[str, Any]]:
+    """在调用 LLM 前完成受支持站点的入口点击、筛选和岗位提取。"""
+    website_url = _deterministic_presearch_url(company)
+    if not website_url:
+        return []
+    from job_application_agent_langchain.agents.search import (
+        navigate_and_find_positions,
+    )
+    from job_application_agent_langchain.browser.automation import BrowserAutomation
+    from job_application_agent_langchain.config import Settings
+
+    await emitter.emit_progress(
+        "search",
+        "正在执行确定性招聘页操作（无需等待模型决定下一步）",
+        company.company_name,
+    )
+    settings = Settings()
+    browser = await BrowserAutomation.get_shared(
+        headless=settings.browser_headless,
+        timeout=settings.browser_timeout,
+    )
+    async with browser.operation_lock:
+        navigation_result = await navigate_and_find_positions.coroutine(
+            website_url=website_url,
+            job_keywords=company.job_keywords,
+            preferred_cities=",".join(company.preferred_cities),
+            recruitment_type=company.recruitment_type,
+        )
+    return _parse_structured_positions(navigation_result)
+
+
+# 保留原名称，兼容已有测试与调用方。
+_prefetch_feishu_positions = _prefetch_structured_positions
+
+
+async def _invoke_agent_with_search_watchdog(
+    agent,
+    messages: list,
+    company: CompanyState,
+    emitter: AgentEventEmitter,
+    settings: Settings,
+):
+    """限制 deepagents 的超大默认循环，并监控搜索阶段是否持续无进展。"""
+    invocation = asyncio.create_task(
+        agent.ainvoke(
+            {"messages": messages},
+            config={"recursion_limit": settings.agent_recursion_limit},
+        )
+    )
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+    failure_started_at: float | None = None
+    next_heartbeat = 15
+
+    try:
+        while True:
+            done, _ = await asyncio.wait({invocation}, timeout=0.25)
+            if done:
+                return await invocation
+
+            # 岗位推荐已记录后，搜索阶段结束；后续 HITL 可以正常等待用户。
+            if company.search_completed:
+                return await invocation
+
+            elapsed = loop.time() - started_at
+            if company.status == "search_failed":
+                if failure_started_at is None:
+                    failure_started_at = loop.time()
+                elif loop.time() - failure_started_at >= 12:
+                    raise SearchPhaseTimeoutError(
+                        company.error_message or "搜索失败后 Agent 未按要求结束"
+                    )
+
+            if elapsed >= settings.search_phase_timeout:
+                raise SearchPhaseTimeoutError(
+                    f"搜索与岗位推荐阶段超过 {settings.search_phase_timeout} 秒，"
+                    "已自动中断，避免 Agent 无限循环"
+                )
+
+            if elapsed >= next_heartbeat:
+                await emitter.emit_progress(
+                    "search",
+                    (
+                        f"Agent 正在分析搜索结果（已用时 {int(elapsed)} 秒，"
+                        f"硬上限 {settings.search_phase_timeout} 秒）"
+                    ),
+                    company.company_name,
+                )
+                next_heartbeat += 15
+    except BaseException:
+        if not invocation.done():
+            invocation.cancel()
+            try:
+                await invocation
+            except asyncio.CancelledError:
+                pass
+        raise
+
+
 # ============================================================================
 # 主入口：运行单个公司的完整投递流程
 # ============================================================================
@@ -570,10 +978,15 @@ async def run_company_agent(
     _company_ctx.set(company)
     _missing_fields_ctx.set([])
     _file_paths_ctx.set(file_paths or {})
-    _recommended_positions_ctx.set([])
-    _selected_positions_ctx.set([])
-    _form_filled_ctx.set(False)
+    existing_recommended = list(company.recommended_positions)
+    existing_selected = list(company.selected_positions)
+    _recommended_positions_ctx.set(existing_recommended)
+    _selected_positions_ctx.set(existing_selected)
+    _reviewed_resume_ctx.set(None)
+    _form_filled_ctx.set(company.form_filled)
+    _form_ready_ctx.set(False)
     _submitted_ctx.set(False)
+    company.search_completed = bool(existing_recommended or company.search_completed)
 
     # 合并 file_paths 与 user_info.resume_file_path
     effective_file_paths = dict(file_paths or {})
@@ -586,20 +999,113 @@ async def run_company_agent(
     try:
         await emitter.emit_progress("search", f"开始处理 {company_name} 的投递流程", company_name)
 
+        # 飞书招聘页面的打开、城市勾选和岗位提取不应依赖 LLM 自主决定工具
+        # 调用顺序。先确定性执行并直接向用户展示候选，避免搜索阶段超时。
+        deterministic_presearch_enabled = bool(_deterministic_presearch_url(company))
+        resuming_selection = bool(existing_selected)
+        preloaded_positions = (
+            (existing_recommended or existing_selected)
+            if resuming_selection
+            else await _prefetch_structured_positions(company, emitter)
+        )
+        if deterministic_presearch_enabled and not preloaded_positions:
+            error_message = (
+                company.error_message
+                or "招聘页操作已完成，但没有找到同时符合城市和岗位方向的岗位"
+            )
+            company.status = "search_failed"
+            company.error_message = error_message
+            await emitter.emit_progress(
+                "search",
+                f"确定性筛选结束：{error_message}",
+                company_name,
+            )
+            return {
+                "status": "search_failed",
+                "form_filled": False,
+                "submitted": False,
+                "recommended_positions": [],
+                "selected_positions": [],
+                "error": error_message,
+                "agent_type": "deterministic_presearch",
+                "final_message": error_message,
+                "messages": [],
+            }
+        if preloaded_positions:
+            preloaded_positions = preloaded_positions[:8]
+            _recommended_positions_ctx.set(preloaded_positions)
+            company.recommended_positions = preloaded_positions
+            company.search_completed = True
+            await emitter.emit_progress(
+                "recommend",
+                f"已完成确定性筛选，找到 {len(preloaded_positions)} 个匹配岗位",
+                company_name,
+            )
+            if resuming_selection:
+                selected_positions = existing_selected
+                await emitter.emit_progress(
+                    "recommend",
+                    f"已恢复之前选择的岗位：{selected_positions[0].get('name') or selected_positions[0].get('title') or ''}",
+                    company_name,
+                )
+            else:
+                selection_result = await request_position_selection.coroutine(
+                    json.dumps(preloaded_positions, ensure_ascii=False)
+                )
+                try:
+                    selected_positions = json.loads(selection_result).get(
+                        "selected_positions", []
+                    )
+                except (json.JSONDecodeError, AttributeError):
+                    selected_positions = []
+            _selected_positions_ctx.set(selected_positions)
+            company.selected_positions = selected_positions
+            if not selected_positions:
+                company.status = "user_skipped"
+                return {
+                    "status": "user_skipped",
+                    "form_filled": False,
+                    "submitted": False,
+                    "recommended_positions": preloaded_positions,
+                    "selected_positions": [],
+                    "error": "",
+                    "agent_type": "deterministic_presearch",
+                    "final_message": "用户未选择岗位",
+                    "messages": [],
+                }
+            company.status = "positions_selected"
+
         # 创建 Agent
         model = _get_llm()
         tools = get_company_agent_tools()
         system_prompt = _build_system_prompt(user_info, company, effective_file_paths, memory)
+        if preloaded_positions:
+            system_prompt += (
+                "\n\n## 本次已完成的阶段\n"
+                "程序已经完成招聘页导航、城市复选框验证、岗位方向筛选、推荐记录和用户岗位选择。"
+                "禁止再次调用 search_company_website、navigate_and_find_positions、"
+                "find_max_positions、report_recommended_positions 或 request_position_selection。"
+                "已选岗位对象中的 jd 字段就是页面提取的完整职位描述；jd 非空时禁止再次打开详情页。"
+                "直接从阶段 3 开始：使用该 jd、读取上传简历并润色。"
+            )
         agent, agent_type = _create_agent(model, tools, system_prompt)
 
         # 构建用户消息
-        user_message = (
-            f"请开始处理「{company_name}」的{company.recruitment_type}投递流程。\n"
-            f"岗位关键词: {company.job_keywords}\n"
-            f"期望城市: {','.join(company.preferred_cities) if company.preferred_cities else '不限'}\n"
-            f"内推码: {company.referral_code or '无'}\n\n"
-            f"请按照工作流程依次执行搜索、推荐、润色、填表、投递。"
-        )
+        if preloaded_positions:
+            user_message = (
+                f"「{company_name}」的搜索和岗位选择已由程序确定性完成。\n"
+                f"用户已选岗位: {json.dumps(company.selected_positions, ensure_ascii=False)}\n"
+                "请勿重复搜索或重新请求选择；直接读取第一个已选岗位 JD，"
+                "若岗位对象已有 jd 就直接使用，随后使用已上传简历开始阶段 3 的简历润色。"
+            )
+        else:
+            user_message = (
+                f"请开始处理「{company_name}」的{company.recruitment_type}投递流程。\n"
+                f"岗位关键词: {company.job_keywords}\n"
+                f"期望城市: {','.join(company.preferred_cities) if company.preferred_cities else '不限'}\n"
+                f"内推码: {company.referral_code or '无'}\n\n"
+                f"请按照工作流程依次执行搜索、推荐、润色、填表、投递。"
+            )
 
         # 构建 messages 列表：续接时包含历史消息
         messages = []
@@ -608,7 +1114,14 @@ async def run_company_agent(
         messages.append(HumanMessage(content=user_message))
 
         # 调用 Agent
-        result = await agent.ainvoke({"messages": messages})
+        settings = Settings()
+        result = await _invoke_agent_with_search_watchdog(
+            agent,
+            messages,
+            company,
+            emitter,
+            settings,
+        )
 
         # 从上下文中提取结果
         recommended = _recommended_positions_ctx.get() or []
@@ -642,12 +1155,28 @@ async def run_company_agent(
             "submitted": submitted,
             "recommended_positions": recommended,
             "selected_positions": selected,
-            "error": "",
+            "error": company.error_message,
             "agent_type": agent_type,
             "final_message": final_message[:500] if final_message else "",
             "messages": result.get("messages", []) if result else [],
         }
 
+    except SearchPhaseTimeoutError as e:
+        company.status = "search_failed"
+        company.error_message = str(e)
+        await emitter.emit_progress(
+            "search",
+            f"搜索已自动中断：{e}",
+            company_name,
+        )
+        return {
+            "status": "search_failed",
+            "form_filled": _form_filled_ctx.get(),
+            "submitted": _submitted_ctx.get(),
+            "recommended_positions": _recommended_positions_ctx.get() or [],
+            "error": str(e),
+            "messages": [],
+        }
     except Exception as e:
         company.status = "error"
         company.error_message = str(e)

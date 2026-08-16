@@ -13,9 +13,6 @@ from job_application_agent_langchain.agent_events import AgentEventEmitter
 if TYPE_CHECKING:
     from job_application_agent_langchain.web.session_manager import SessionManager
 
-# 用户请求超时时间（秒）
-REQUEST_TIMEOUT = 300  # 5 分钟
-
 # WebSocket 断开时设置到 future 上的哨兵值，emitter 据此返回默认值
 _DISCONNECTED_SENTINEL = {"__disconnected__": True}
 
@@ -130,13 +127,20 @@ class WebEventEmitter(AgentEventEmitter):
             selected = []
         return selected if isinstance(selected, list) else []
 
-    async def request_user_login(self, request_id: str, login_url: str, message: str) -> str:
+    async def request_user_login(
+        self,
+        request_id: str,
+        login_url: str,
+        message: str,
+        mode: str = "login",
+    ) -> str:
         event = {
             "type": "request",
             "request_id": request_id,
             "request_type": "user_login",
             "login_url": login_url,
             "message": message,
+            "mode": mode,
         }
         result = await self._request(event, request_id, "logged_in")
         if isinstance(result, dict):
@@ -166,21 +170,13 @@ class WebEventEmitter(AgentEventEmitter):
         await self.session_manager.push_event(self.session_id, event)
 
         try:
-            result = await asyncio.wait_for(future, timeout=REQUEST_TIMEOUT)
-        except asyncio.TimeoutError:
-            await self.session_manager.push_event(
-                self.session_id,
-                {
-                    "type": "error",
-                    "message": f"请求 {request_id} 等待用户响应超时（{REQUEST_TIMEOUT}秒）",
-                },
-            )
-            self.session_manager.unregister_request(self.session_id, request_id)
-            return default
+            # Login, review and final submission are human decisions.  They do
+            # not silently time out to a default; the user may cancel the task.
+            result = await future
         except asyncio.CancelledError:
-            # 任务被取消（如服务停止），返回默认值
             self.session_manager.unregister_request(self.session_id, request_id)
-            return default
+            # 显式停止必须终止整个 Agent，不能把取消伪装成人工确认成功。
+            raise
 
         # WebSocket 断开时由 detach_websocket 设置哨兵值
         if isinstance(result, dict) and result.get("__disconnected__"):

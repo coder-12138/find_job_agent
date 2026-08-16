@@ -13,6 +13,7 @@ class CompanyInput(BaseModel):
     referral_code: str = ""
     job_keywords: str = ""
     preferred_cities: list[str] = Field(default_factory=list)
+    application_url: str = ""
     parallel: bool = False
 
 
@@ -21,6 +22,7 @@ class SessionCreateRequest(BaseModel):
 
     companies: list[CompanyInput]
     parallel: bool = False
+    profile_version_id: str | None = None
 
 
 class DocumentSessionRequest(BaseModel):
@@ -62,6 +64,27 @@ class ApiSettings(BaseModel):
     model_name: str = "gpt-4o"
 
 
+class ApiSettingsStatus(BaseModel):
+    """当前进程中的临时 Agent API 配置状态（不返回密钥）。"""
+
+    api_base_url: str = "https://api.openai.com/v1"
+    model_name: str = "gpt-4o"
+    api_key_configured: bool = False
+    verified: bool = False
+    verified_at: str = ""
+    last_error: str = ""
+
+
+class ApiConnectionTestResponse(BaseModel):
+    """Agent API 连接验证结果。"""
+
+    success: bool
+    message: str
+    api_base_url: str
+    model_name: str
+    verified_at: str
+
+
 class MemoryResponse(BaseModel):
     """记忆内容响应。"""
 
@@ -86,6 +109,9 @@ class FileUploadResponse(BaseModel):
     file_type: str
     saved_path: str
     size: int
+    resource_id: str | None = None
+    duplicate: bool = False
+    extraction: dict[str, Any] | None = None
 
 
 class MessageRequest(BaseModel):

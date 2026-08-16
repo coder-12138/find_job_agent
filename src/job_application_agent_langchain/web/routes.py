@@ -1,5 +1,6 @@
 """REST API 路由。"""
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -7,10 +8,24 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from job_application_agent_langchain.config import Settings
 from job_application_agent_langchain.context import CompanyState, RECRUITMENT_TYPES
-from job_application_agent_langchain.user_info.parser import load_user_info
-from job_application_agent_langchain.web.file_storage import list_uploads, save_upload_file
+from job_application_agent_langchain.api_v2.dependencies import (
+    get_file_resource_service,
+    get_profile_service,
+    get_resume_extraction_service,
+)
+from job_application_agent_langchain.application.legacy_profile_bridge import (
+    load_profile_for_legacy_session,
+)
+from job_application_agent_langchain.application.profiles import ProfileNotFoundError
+from job_application_agent_langchain.resume_ingestion import ResumeExtractor
+from job_application_agent_langchain.web.file_storage import (
+    list_uploads,
+    save_upload_file,
+)
 from job_application_agent_langchain.web.schemas import (
+    ApiConnectionTestResponse,
     ApiSettings,
+    ApiSettingsStatus,
     ConfirmRequest,
     DocumentSessionRequest,
     FileUploadResponse,
@@ -22,23 +37,16 @@ from job_application_agent_langchain.web.schemas import (
 )
 from job_application_agent_langchain.web.session_manager import session_manager
 from job_application_agent_langchain.web.settings_store import (
+    clear_api_settings,
+    is_api_verified,
     load_api_settings,
     load_settings,
     save_api_settings,
     save_settings,
+    verify_api_settings,
 )
 
 router = APIRouter(prefix="/api")
-
-
-# ----------------------------------------------------------------------
-# 工具函数
-# ----------------------------------------------------------------------
-
-def _load_user_info():
-    """加载用户信息（每次调用都重新读取，以反映最新文件）。"""
-    settings = Settings()
-    return load_user_info(settings.personal_info_file_path, settings.resume_file_path)
 
 
 # ----------------------------------------------------------------------
@@ -50,13 +58,31 @@ async def create_session(req: SessionCreateRequest) -> SessionResponse:
     """创建投递会话并启动后台 Agent。"""
     if not req.companies:
         raise HTTPException(status_code=400, detail="至少需要一家公司")
+    if not is_api_verified():
+        raise HTTPException(
+            status_code=400,
+            detail="请先在左侧「Agent 连接」页面输入 API 配置并完成连接验证",
+        )
 
     settings = Settings()
     errors = settings.validate()
     if errors:
         raise HTTPException(status_code=400, detail="; ".join(errors))
 
-    user_info = _load_user_info()
+    try:
+        profile_session = await asyncio.to_thread(
+            load_profile_for_legacy_session, req.profile_version_id
+        )
+    except ProfileNotFoundError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="请先在「候选人档案」中上传 PDF、确认内容并选择一个可用版本",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"候选人档案的来源 PDF 无法用于润色：{exc}",
+        ) from exc
 
     companies = [
         CompanyState(
@@ -65,11 +91,19 @@ async def create_session(req: SessionCreateRequest) -> SessionResponse:
             referral_code=c.referral_code,
             job_keywords=c.job_keywords,
             preferred_cities=list(c.preferred_cities),
+            application_url=c.application_url,
         )
         for c in req.companies
     ]
 
-    session_id = session_manager.create_session(companies, req.parallel, user_info)
+    session_id = session_manager.create_session(
+        companies,
+        req.parallel,
+        profile_session.user_info,
+        profile_id=profile_session.profile_id,
+        profile_version_id=profile_session.profile_version_id,
+        temporary_files=list(profile_session.temporary_files),
+    )
     info = session_manager.get_session(session_id)
     return SessionResponse(
         session_id=session_id,
@@ -80,24 +114,9 @@ async def create_session(req: SessionCreateRequest) -> SessionResponse:
 
 @router.post("/sessions/document", response_model=SessionResponse)
 async def create_document_session_endpoint(req: DocumentSessionRequest) -> SessionResponse:
-    """从腾讯文档创建投递会话。"""
-    if not req.doc_url or "docs.qq.com" not in req.doc_url:
-        raise HTTPException(status_code=400, detail="请提供有效的腾讯文档链接")
-    settings = Settings()
-    errors = settings.validate()
-    if errors:
-        raise HTTPException(status_code=400, detail="; ".join(errors))
-    user_info = _load_user_info()
-    session_id = session_manager.create_document_session(
-        req.doc_url, req.job_keyword, req.industry, req.city,
-        req.recruitment_type, req.parallel, user_info,
-    )
-    info = session_manager.get_session(session_id)
-    return SessionResponse(
-        session_id=session_id,
-        status=info.status if info else "pending",
-        created_at=info.created_at if info else "",
-    )
+    """腾讯文档入口已按产品范围决定移除。"""
+    del req
+    raise HTTPException(status_code=410, detail="腾讯文档投递已移除，请在投递任务中直接添加公司")
 
 
 @router.get("/sessions/{session_id}")
@@ -143,6 +162,15 @@ async def interrupt_session(session_id: str, req: MessageRequest) -> dict:
     return session_manager.interrupt_and_restart(session_id, req.message)
 
 
+@router.post("/sessions/{session_id}/cancel")
+async def cancel_session(session_id: str) -> dict:
+    """立即停止当前 Agent，不自动重启。"""
+    info = session_manager.get_session(session_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return await session_manager.cancel_session(session_id)
+
+
 # ----------------------------------------------------------------------
 # 文件上传
 # ----------------------------------------------------------------------
@@ -153,7 +181,31 @@ async def upload_file(
 ) -> FileUploadResponse:
     """上传文件。multipart 表单字段：file, file_type。"""
     try:
-        return await save_upload_file(file, file_type)
+        if file_type != "resume":
+            return await save_upload_file(file, file_type)
+
+        original_name = Path(file.filename or "resume.pdf").name
+        if Path(original_name).suffix.lower() != ".pdf":
+            raise ValueError("简历只接受 PDF 文件")
+        content = await file.read()
+        if len(content) > 20 * 1024 * 1024:
+            raise ValueError("PDF 简历不能超过 20 MiB")
+        if b"%PDF-" not in content[:1024]:
+            raise ValueError("文件内容不是有效的 PDF")
+        saved = get_file_resource_service().save(
+            content, original_name=original_name, media_type="application/pdf"
+        )
+        extraction = ResumeExtractor().extract(content).to_dict()
+        get_resume_extraction_service().save(saved.resource_id, extraction)
+        return FileUploadResponse(
+            filename=original_name,
+            file_type="resume",
+            saved_path="",
+            size=len(content),
+            resource_id=saved.resource_id,
+            duplicate=not saved.created,
+            extraction=extraction,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -163,7 +215,24 @@ async def upload_file(
 @router.get("/uploads")
 async def get_uploads() -> dict:
     """列出所有已上传的文件。"""
-    return {"uploads": list_uploads()}
+    encrypted_resumes = [
+        {
+            "file_type": "resume",
+            "filename": item["original_name"],
+            "saved_path": "",
+            "size": item["byte_size"],
+            "modified_at": item["created_at"],
+            "resource_id": item["id"],
+            "encrypted": True,
+        }
+        for item in get_file_resource_service().list_resources(
+            media_type="application/pdf"
+        )
+    ]
+    legacy_other_files = [
+        item for item in list_uploads() if item.get("file_type") != "resume"
+    ]
+    return {"uploads": encrypted_resumes + legacy_other_files}
 
 
 # ----------------------------------------------------------------------
@@ -189,17 +258,30 @@ async def update_notification_settings(
 # API 配置
 # ----------------------------------------------------------------------
 
-@router.get("/settings/api", response_model=ApiSettings)
-async def get_api_settings() -> ApiSettings:
+@router.get("/settings/api", response_model=ApiSettingsStatus)
+async def get_api_settings() -> ApiSettingsStatus:
     return load_api_settings()
 
 
-@router.put("/settings/api", response_model=ApiSettings)
-async def update_api_settings(settings: ApiSettings) -> ApiSettings:
-    ok = save_api_settings(settings)
-    if not ok:
-        raise HTTPException(status_code=500, detail="保存设置失败")
-    return settings
+@router.put("/settings/api", response_model=ApiSettingsStatus)
+async def update_api_settings(settings: ApiSettings) -> ApiSettingsStatus:
+    """临时载入配置但不验证；不会写入磁盘。"""
+    return save_api_settings(settings)
+
+
+@router.post("/settings/api/verify", response_model=ApiConnectionTestResponse)
+async def verify_api_connection(settings: ApiSettings) -> ApiConnectionTestResponse:
+    """验证 Agent API；成功后仅在本次服务进程中启用。"""
+    try:
+        return await verify_api_settings(settings)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/settings/api", response_model=ApiSettingsStatus)
+async def delete_api_settings() -> ApiSettingsStatus:
+    """立即清除当前进程内的 API 密钥。"""
+    return clear_api_settings()
 
 
 # ----------------------------------------------------------------------
@@ -215,14 +297,42 @@ async def get_memory() -> MemoryResponse:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            source_user_info = data.get("source_user_info", {})
+            try:
+                active = get_profile_service().get_active_version()
+                fields = active.fields
+                source_user_info = dict(fields.get("personal_info") or {})
+                source_user_info.update(
+                    {
+                        key: value
+                        for key, value in fields.items()
+                        if key not in {"personal_info", "resume_text", "raw_resume_text"}
+                        and not isinstance(value, (dict, list))
+                    }
+                )
+                if fields.get("full_name"):
+                    source_user_info["name"] = fields["full_name"]
+            except ProfileNotFoundError:
+                pass
             return MemoryResponse(
                 learned_fields=data.get("learned_fields", {}),
-                source_user_info=data.get("source_user_info", {}),
+                source_user_info=source_user_info,
                 field_metadata=data.get("field_metadata", {}),
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"读取记忆失败: {e}")
-    return MemoryResponse()
+    try:
+        active = get_profile_service().get_active_version()
+        fields = dict(active.fields)
+        source = dict(fields.get("personal_info") or {})
+        source.update(
+            {key: value for key, value in fields.items() if isinstance(value, str) and key != "resume_text"}
+        )
+        if fields.get("full_name"):
+            source["name"] = fields["full_name"]
+        return MemoryResponse(source_user_info=source)
+    except ProfileNotFoundError:
+        return MemoryResponse()
 
 
 @router.delete("/memory/{field_name}")

@@ -31,6 +31,10 @@ class CompanyState:
     error_message: str = ""
     # 预填的投递链接（来自文档表格）
     application_url: str = ""
+    # 搜索得到的候选链接和已判定失效的链接，用于自动回退且避免重复访问
+    candidate_urls: list[str] = field(default_factory=list)
+    rejected_urls: list[str] = field(default_factory=list)
+    search_completed: bool = False
     # 来源标记：manual=手动输入，document=文档自动发现
     source: str = "manual"
 

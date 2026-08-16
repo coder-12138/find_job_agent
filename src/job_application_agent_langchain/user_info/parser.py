@@ -1,10 +1,21 @@
 import json
+import hashlib
 import os
 import re
+import threading
+import zipfile
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 from pydantic import BaseModel, Field
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+RESUME_TEXT_CACHE_PATH = PROJECT_ROOT / "data" / "resume_text_cache.json"
+_RESUME_CACHE_VERSION = 1
+_RESUME_CACHE_MAX_ENTRIES = 20
+_RESUME_CACHE_LOCK = threading.Lock()
 
 
 class PersonalInfo(BaseModel):
@@ -209,27 +220,151 @@ class UserInfo(BaseModel):
         if self.self_introduction:
             parts.append(f"\n自我介绍: {self.self_introduction}")
 
+        resume_text = str(self.extra_fields.get("resume_text") or "").strip()
+        if self.resume_file_path:
+            parts.append(f"\n已上传简历: {self.resume_file_path}")
+        if resume_text:
+            parts.append(f"\n上传简历原文（已解析）:\n{resume_text[:12000]}")
+
         return "\n".join(parts)
+
+
+def _load_resume_text_cache() -> dict[str, Any]:
+    try:
+        data = json.loads(RESUME_TEXT_CACHE_PATH.read_text(encoding="utf-8"))
+        if (
+            isinstance(data, dict)
+            and data.get("version") == _RESUME_CACHE_VERSION
+            and isinstance(data.get("entries"), dict)
+        ):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"version": _RESUME_CACHE_VERSION, "entries": {}}
+
+
+def _save_resume_text_cache(cache: dict[str, Any]) -> None:
+    RESUME_TEXT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = RESUME_TEXT_CACHE_PATH.with_name(
+        f"{RESUME_TEXT_CACHE_PATH.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        temp_path.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temp_path, RESUME_TEXT_CACHE_PATH)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _resume_cache_identity(path: Path) -> tuple[str, dict[str, Any]]:
+    resolved = path.resolve()
+    stat = resolved.stat()
+    fingerprint = {
+        "source_path": str(resolved),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+    key_source = (
+        f"{fingerprint['source_path']}\0"
+        f"{fingerprint['size']}\0{fingerprint['mtime_ns']}"
+    )
+    key = hashlib.sha256(key_source.encode("utf-8")).hexdigest()
+    return key, fingerprint
+
+
+def _extract_resume_text_uncached(path: Path) -> str:
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            from pypdf import PdfReader
+
+            pages = [
+                (page.extract_text() or "").strip()
+                for page in PdfReader(str(path)).pages
+            ]
+            return "\n\n".join(page for page in pages if page).strip()
+        if suffix == ".docx":
+            with zipfile.ZipFile(path) as archive:
+                xml = archive.read("word/document.xml")
+            root = ElementTree.fromstring(xml)
+            paragraphs = []
+            namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+            for paragraph in root.iter(f"{namespace}p"):
+                text = "".join(
+                    node.text or "" for node in paragraph.iter(f"{namespace}t")
+                ).strip()
+                if text:
+                    paragraphs.append(text)
+            return "\n".join(paragraphs)
+        if suffix in {".txt", ".md"}:
+            return path.read_text(encoding="utf-8", errors="replace").strip()
+    except Exception as exc:
+        print(f"[简历] 读取上传简历失败 ({path.name}): {exc}")
+    return ""
+
+
+def extract_resume_text(resume_path: str) -> str:
+    """提取简历原文，并按路径、大小和修改时间持久缓存以供重启后复用。"""
+    path = Path(resume_path)
+    if not path.is_file():
+        return ""
+
+    try:
+        cache_key, fingerprint = _resume_cache_identity(path)
+    except OSError:
+        return ""
+
+    with _RESUME_CACHE_LOCK:
+        cache = _load_resume_text_cache()
+        cached = cache["entries"].get(cache_key)
+        if isinstance(cached, dict):
+            cached_text = str(cached.get("text") or "").strip()
+            if cached_text:
+                print(f"[简历] 命中持久缓存: {path.name}")
+                return cached_text
+
+        text = _extract_resume_text_uncached(path).strip()
+        if not text:
+            return ""
+
+        entries = cache["entries"]
+        entries[cache_key] = {**fingerprint, "text": text}
+        if len(entries) > _RESUME_CACHE_MAX_ENTRIES:
+            oldest_keys = list(entries)[: len(entries) - _RESUME_CACHE_MAX_ENTRIES]
+            for old_key in oldest_keys:
+                entries.pop(old_key, None)
+        try:
+            _save_resume_text_cache(cache)
+            print(f"[简历] 已解析并保存持久缓存: {path.name}")
+        except OSError as exc:
+            # 缓存失败不能让已成功读取的简历或文件上传一起失败。
+            print(f"[简历] 原文已解析，但持久缓存写入失败 ({path.name}): {exc}")
+        return text
 
 
 def load_user_info(personal_info_path: str, resume_path: str = "") -> UserInfo:
     info = UserInfo()
     path = Path(personal_info_path)
 
-    if not path.exists():
-        return info
-
-    if path.suffix == ".json":
+    if path.exists() and path.suffix == ".json":
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         info = UserInfo.model_validate(data)
-    elif path.suffix in (".txt", ".md"):
+    elif path.exists() and path.suffix in (".txt", ".md"):
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
         info = parse_txt_info(content)
 
     if resume_path and os.path.exists(resume_path):
         info.resume_file_path = os.path.abspath(resume_path)
+        resume_text = extract_resume_text(info.resume_file_path)
+        if resume_text:
+            info.extra_fields["resume_text"] = resume_text
 
     return info
 

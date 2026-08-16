@@ -77,28 +77,22 @@ class TestModuleWiring:
         assert isinstance(app, FastAPI)
 
     def test_rest_routes_registered(self):
-        """所有 REST 路由应已注册到 app。"""
+        """The production task workflow routes are registered."""
         paths = _collect_all_paths(app)
         expected = {
-            "/api/sessions",
-            "/api/upload",
-            "/api/settings/notifications",
-            "/api/memory",
-            "/api/sessions/{session_id}/confirm",
-            "/api/sessions/{session_id}/message",
-            "/api/sessions/{session_id}/interrupt",
-            "/api/health",
-            "/api/recruitment-types",
-            "/api/uploads",
-            "/api/memory/{field_name}",
+            "/api/v2/health",
+            "/api/v2/profiles",
+            "/api/v2/applications",
+            "/api/v2/applications/{application_id}/browser/open",
         }
         missing = expected - paths
         assert not missing, f"缺少路由: {missing}"
 
     def test_websocket_route_registered(self):
-        """WebSocket 路由 /ws/sessions/{session_id} 应已注册。"""
+        """Legacy chat and document controllers are deliberately absent."""
         paths = _collect_all_paths(app)
-        assert "/ws/sessions/{session_id}" in paths
+        assert "/ws/sessions/{session_id}" not in paths
+        assert "/api/sessions/document" not in paths
 
     def test_web_emitter_is_subclass(self):
         """WebEventEmitter 应为 AgentEventEmitter 的子类。"""
@@ -167,43 +161,26 @@ class TestWebAPI:
     """使用 TestClient 验证 REST 端点行为。"""
 
     def test_health_endpoint(self, client):
-        """GET /api/health 应返回 {"status": "ok"}。"""
-        resp = client.get("/api/health")
+        """GET /api/v2/health reports the authoritative schema."""
+        resp = client.get("/api/v2/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        assert resp.json()["status"] == "ok"
+        assert resp.json()["schema_version"] >= 4
 
     def test_recruitment_types_endpoint(self, client):
-        """GET /api/recruitment-types 应返回含 recruitment_types 列表的 dict。"""
+        """Legacy recruitment enum endpoint is not mounted."""
         resp = client.get("/api/recruitment-types")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "recruitment_types" in data
-        assert isinstance(data["recruitment_types"], list)
-        assert len(data["recruitment_types"]) > 0
+        assert resp.status_code == 404
 
     def test_notification_settings_endpoint(self, client):
-        """GET /api/settings/notifications 应返回 NotificationSettings 形状的 dict。"""
+        """Legacy notification settings are not part of the task core."""
         resp = client.get("/api/settings/notifications")
-        assert resp.status_code == 200
-        data = resp.json()
-        for key in (
-            "email_enabled",
-            "smtp_server",
-            "smtp_port",
-            "smtp_use_tls",
-            "smtp_sender_email",
-            "smtp_sender_password",
-            "smtp_recipient_email",
-        ):
-            assert key in data, f"缺少字段: {key}"
+        assert resp.status_code == 404
 
     def test_memory_endpoint(self, client):
-        """GET /api/memory 应返回 MemoryResponse 形状的 dict。"""
+        """Legacy agent memory endpoint is not mounted."""
         resp = client.get("/api/memory")
-        assert resp.status_code == 200
-        data = resp.json()
-        for key in ("learned_fields", "source_user_info", "field_metadata"):
-            assert key in data, f"缺少字段: {key}"
+        assert resp.status_code == 404
 
     def test_root_returns_html(self, client):
         """GET / 应返回 HTML（状态 200，content-type text/html）。"""
